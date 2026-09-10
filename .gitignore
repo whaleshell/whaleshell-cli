@@ -1,0 +1,7 @@
+*.exe
+*.test
+*.out
+/osg
+/osg-init
+/osg-gateway
+.DS_Store

@@ -1,0 +1,52 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 lkmavi
+# SPDX-License-Identifier: MIT
+#
+# Default osg sandbox policy (product schema).
+# OpenShell-shaped YAML is still accepted by policy.Parse for migration.
+
+version: 1
+
+filesystem:
+  include_workdir: true
+  read:
+    - /usr
+    - /lib
+    - /proc
+    - /dev/urandom
+    - /app
+    - /etc
+    - /var/log
+  write:
+    - /tmp
+    - /dev/null
+  mode: best_effort
+
+network:
+  default: deny
+  allow:
+    - id: anthropic
+      host: api.anthropic.com
+      port: 443
+    - id: openai
+      host: "*.openai.com"
+      ports: [443]
+    - id: ghcr
+      host: ghcr.io
+      port: 443
+
+display:
+  mode: none
+  publish: 127.0.0.1
+  port: 6080
+  auth: password
+  browser: chromium
+
+credentials:
+  env_allow:
+    - TERM
+    - LANG
+    - COLORTERM
+    - ANTHROPIC_API_KEY
+    - OPENAI_API_KEY
+    - DISPLAY
+  write_to_disk: false
