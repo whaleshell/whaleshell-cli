@@ -1,0 +1,127 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 lkmavi
+# SPDX-License-Identifier: MIT
+#
+# Cursor-oriented sandbox policy (C1 agent-in-sandbox / C2 host IDE + workdir).
+
+version: 1
+
+filesystem:
+  include_workdir: true
+  read:
+    - /usr
+    - /lib
+    - /proc
+    - /dev/urandom
+    - /app
+    - /etc
+    - /var/log
+    - /tmp
+  write:
+    - /tmp
+    - /dev/null
+    - /workspace
+    - /osg/data
+  mode: best_effort
+
+network:
+  default: deny
+  allow:
+    # Cursor Agent runtime (subdomains change; use multi-label globs)
+    - id: cursor-sh
+      host: "**.cursor.sh"
+      port: 443
+    - id: cursor-com
+      host: "**.cursor.com"
+      port: 443
+    - id: cursor-com-apex
+      host: cursor.com
+      port: 443
+    - id: cursor-downloads
+      host: downloads.cursor.com
+      port: 443
+    - id: cursor-blob
+      host: cursor.blob.core.windows.net
+      port: 443
+    - id: cursor-ms-cdn
+      host: cursor.download.prss.microsoft.com
+      port: 443
+    - id: github
+      host: github.com
+      port: 443
+    - id: github-api
+      host: api.github.com
+      port: 443
+    - id: ghcr
+      host: ghcr.io
+      port: 443
+    - id: github-release-assets
+      host: release-assets.githubusercontent.com
+      port: 443
+    - id: github-objects
+      host: objects.githubusercontent.com
+      port: 443
+    - id: github-usercontent
+      host: "**.githubusercontent.com"
+      port: 443
+    # Go toolchain + modules
+    - id: go-dev
+      host: go.dev
+      port: 443
+    - id: go-dl
+      host: dl.google.com
+      port: 443
+    - id: go-proxy
+      host: proxy.golang.org
+      port: 443
+    - id: go-sum
+      host: sum.golang.org
+      port: 443
+    - id: goproxy-io
+      host: goproxy.io
+      port: 443
+    - id: storage-googleapis
+      host: storage.googleapis.com
+      port: 443
+    # apt bootstrap (Debian bookworm)
+    - id: debian-deb
+      host: deb.debian.org
+      ports: [80, 443]
+    - id: debian-security
+      host: security.debian.org
+      ports: [80, 443]
+    - id: debian-cdn
+      host: cdn-fastly.deb.debian.org
+      ports: [80, 443]
+    # apt bootstrap (Ubuntu — legacy images)
+    - id: ubuntu-archive
+      host: archive.ubuntu.com
+      ports: [80, 443]
+    - id: ubuntu-security
+      host: security.ubuntu.com
+      ports: [80, 443]
+    - id: ubuntu-ports
+      host: ports.ubuntu.com
+      ports: [80, 443]
+
+inference:
+  providers:
+    - anthropic
+    - openai
+
+display:
+  mode: none
+  publish: 127.0.0.1
+  port: 6080
+  auth: password
+  browser: chromium
+
+credentials:
+  env_allow:
+    - TERM
+    - LANG
+    - COLORTERM
+    - CURSOR_API_KEY
+    - ANTHROPIC_API_KEY
+    - OPENAI_API_KEY
+    - DISPLAY
+  write_to_disk: false

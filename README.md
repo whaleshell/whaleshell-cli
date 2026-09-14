@@ -2,15 +2,10 @@
 
 MIT · Host CLI (`osg`).
 
-**Depends on:** `osg-core`, `osg-runtime`, `osg-display`
-
-```text
-osg-cli/
-├── cmd/osg/
-├── internal/cli/
-├── internal/app/
-├── policies/
-└── LICENSE
+```bash
+go build -C osg-cli -o osg ./cmd/osg
+./osg install          # ~/.local/bin/osg → ~/.local/share/osg/bin/osg
+./osg version
 ```
 
-See [LICENSING.md](../docs/LICENSING.md).
+Agent images (`cursor` / `claude` / `codex`): [docker/](./docker/).

@@ -1,0 +1,129 @@
+// Package gwconfig loads multi-gateway CLI config (~/.config/osg/config.yaml).
+package gwconfig
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/zorneth/osg-core/defaults"
+	"gopkg.in/yaml.v3"
+)
+
+// File is the on-disk CLI config.
+type File struct {
+	Current  string             `yaml:"current,omitempty"`
+	Gateways map[string]Gateway `yaml:"gateways,omitempty"`
+	// Images maps BYOC / community short names to container images (--from).
+	Images map[string]string `yaml:"images,omitempty"`
+}
+
+// Gateway is one named control-plane endpoint.
+type Gateway struct {
+	URL     string `yaml:"url"`
+	DataDir string `yaml:"data_dir,omitempty"`
+}
+
+// Path returns the default config path.
+func Path() (string, error) {
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, "osg", "config.yaml"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config", "osg", "config.yaml"), nil
+}
+
+// Load reads config or returns empty defaults.
+func Load() (File, string, error) {
+	p, err := Path()
+	if err != nil {
+		return File{}, "", err
+	}
+	b, err := os.ReadFile(p)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return File{Gateways: map[string]Gateway{}}, p, nil
+		}
+		return File{}, p, err
+	}
+	var f File
+	if err := yaml.Unmarshal(b, &f); err != nil {
+		return File{}, p, fmt.Errorf("config: %w", err)
+	}
+	if f.Gateways == nil {
+		f.Gateways = map[string]Gateway{}
+	}
+	if f.Images == nil {
+		f.Images = map[string]string{}
+	}
+	return f, p, nil
+}
+
+// Save writes config atomically.
+func Save(f File) error {
+	p, err := Path()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return err
+	}
+	b, err := yaml.Marshal(f)
+	if err != nil {
+		return err
+	}
+	tmp := p + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, p)
+}
+
+// CurrentURL returns the selected gateway URL if any.
+func CurrentURL(f File) string {
+	if f.Current == "" {
+		return ""
+	}
+	g, ok := f.Gateways[f.Current]
+	if !ok {
+		return ""
+	}
+	return g.URL
+}
+
+// ResolveImage expands --from aliases (config images map + builtins).
+func ResolveImage(from, explicit string) (string, error) {
+	if explicit != "" && from != "" {
+		return "", fmt.Errorf("use either --image or --from, not both")
+	}
+	if explicit != "" {
+		return explicit, nil
+	}
+	if from == "" {
+		return "", nil
+	}
+	cfg, _, err := Load()
+	if err != nil {
+		return "", err
+	}
+	if img, ok := cfg.Images[from]; ok && img != "" {
+		return img, nil
+	}
+	builtins := map[string]string{
+		"ubuntu":           "ubuntu:24.04",
+		"debian":           defaults.ImageDebian,
+		"osg/cli":          defaults.ImageLocal,
+		"osg/gui":          defaults.ImageGUI,
+		"cursor":           defaults.ImageCursor,
+		"claude":           defaults.ImageClaude,
+		"codex":            defaults.ImageCodex,
+		"community/ollama": "ollama/ollama:latest",
+	}
+	if img, ok := builtins[from]; ok {
+		return img, nil
+	}
+	return "", fmt.Errorf("unknown --from %q (add images.%s to ~/.config/osg/config.yaml)", from, from)
+}

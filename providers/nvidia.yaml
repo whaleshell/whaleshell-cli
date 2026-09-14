@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 lkmavi
+# SPDX-License-Identifier: MIT
+
+id: nvidia
+display_name: NVIDIA
+description: NVIDIA API Catalog / NIM (integrate.api.nvidia.com)
+category: inference
+endpoints:
+  - id: integrate
+    host: integrate.api.nvidia.com
+    port: 443
+    protocol: rest
+    tls: terminate
+    access: read-write
+    enforcement: enforce
+binaries:
+  - /usr/bin/curl
+  - /usr/local/bin/curl
+  - /usr/bin/python3
+  - /usr/bin/python3.13
+  - /usr/local/bin/python
+  - /sandbox/.venv/**
+credentials:
+  - name: api_key
+    env_vars: [NVIDIA_API_KEY]
+    required: true
+    auth_style: bearer
+    header_name: authorization
