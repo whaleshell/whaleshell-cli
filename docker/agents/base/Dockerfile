@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 #
 # Thin Debian base for agent images (parity with osg-runtime images/sandbox:cli).
+# Keep package list in sync with osg-runtime/images/sandbox Dockerfile target cli.
 
 ARG DEBIAN_BASE=debian:bookworm
 FROM ${DEBIAN_BASE}
@@ -10,9 +11,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
-    bash \
-    ca-certificates \
     git \
+    bash \
     && rm -rf /var/lib/apt/lists/*
 
 # osg-init is copied by the build task when present; agent Dockerfiles may skip it

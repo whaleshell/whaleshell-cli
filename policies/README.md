@@ -15,6 +15,6 @@ osg follows the same idea with a thin CLI tree:
 
 - `default.yaml` — create-without-thinking baseline (like OpenShell default, but inference-oriented)
 - `cursor.yaml` — one first-class agent recipe (also copied by `osg init --agent cursor`)
-- Further agents: `examples/` recipes and/or [provider profiles](../../docs/PROVIDERS.md)
+- Further agents: `examples/` recipes and/or [provider profiles](../../docs/PROVIDERS.md) (`github`, `nvidia`, …)
 
 You do not need more files under `policies/` unless you want another first-class `osg init --agent …` target.

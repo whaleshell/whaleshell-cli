@@ -5,7 +5,7 @@ Runtime base image (`osg-sandbox:local`) is built from [`osg-runtime/images/sand
 
 | Path | Tag | Contents |
 |------|-----|----------|
-| [`agents/base`](./agents/base/) | `osg-sandbox:local` | Debian + curl + osg-init (same as runtime cli target) |
+| [`agents/base`](./agents/base/) | `osg-sandbox:local` | Debian + curl + git + osg-init (same as runtime cli target) |
 | [`agents/cursor`](./agents/cursor/) | `osg-sandbox:cursor` | + Cursor Agent CLI under `/opt/cursor-agent` (`agent` → bundled `node`) |
 | [`agents/claude`](./agents/claude/) | `osg-sandbox:claude` | + Claude Code CLI |
 | [`agents/codex`](./agents/codex/) | `osg-sandbox:codex` | + OpenAI Codex CLI |

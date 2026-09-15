@@ -88,13 +88,15 @@ func runProvider(a *app.App, args []string) error {
 			return fmt.Errorf("unknown profile subcommand %q", args[1])
 		}
 	case "create":
-		// osg provider create NAME --from PROFILE [--env KEY,KEY]
+		// osg provider create NAME --from PROFILE [--from-existing|--env K1,K2] [--credential KEY[=VALUE]]…
 		if len(args) < 2 {
-			return fmt.Errorf("usage: osg provider create <name> --from <profile> [--env K1,K2]")
+			return fmt.Errorf("usage: osg provider create <name> --from <profile> [--from-existing|--credential KEY[=VALUE]|--env K1,K2]")
 		}
 		name := args[1]
 		from := ""
+		fromExisting := false
 		var envVars []string
+		credentials := map[string]string{}
 		for i := 2; i < len(args); i++ {
 			switch args[i] {
 			case "--from":
@@ -103,6 +105,8 @@ func runProvider(a *app.App, args []string) error {
 					return fmt.Errorf("--from needs a value")
 				}
 				from = args[i]
+			case "--from-existing":
+				fromExisting = true
 			case "--env":
 				i++
 				if i >= len(args) {
@@ -114,6 +118,25 @@ func runProvider(a *app.App, args []string) error {
 						envVars = append(envVars, k)
 					}
 				}
+			case "--credential":
+				i++
+				if i >= len(args) {
+					return fmt.Errorf("--credential needs KEY or KEY=VALUE")
+				}
+				raw := args[i]
+				if k, v, ok := strings.Cut(raw, "="); ok {
+					fmt.Fprintln(os.Stderr, "warn: --credential KEY=VALUE may appear in shell history/ps; prefer bare --credential KEY")
+					credentials[strings.TrimSpace(k)] = v
+					envVars = append(envVars, strings.TrimSpace(k))
+				} else {
+					key := strings.TrimSpace(raw)
+					v, ok := os.LookupEnv(key)
+					if !ok || strings.TrimSpace(v) == "" {
+						return fmt.Errorf("--credential %s: env var not set on host", key)
+					}
+					credentials[key] = v
+					envVars = append(envVars, key)
+				}
 			default:
 				return fmt.Errorf("unknown flag %q", args[i])
 			}
@@ -121,7 +144,41 @@ func runProvider(a *app.App, args []string) error {
 		if from == "" {
 			return fmt.Errorf("usage: osg provider create <name> --from <profile>")
 		}
-		return a.ProviderCreate(name, from, envVars)
+		return a.ProviderCreate(name, from, envVars, fromExisting, credentials)
+	case "update":
+		// osg provider update NAME [--from-existing] [--credential KEY[=VALUE]]…
+		if len(args) < 2 {
+			return fmt.Errorf("usage: osg provider update <name> [--from-existing|--credential KEY[=VALUE]]")
+		}
+		name := args[1]
+		fromExisting := false
+		credentials := map[string]string{}
+		for i := 2; i < len(args); i++ {
+			switch args[i] {
+			case "--from-existing":
+				fromExisting = true
+			case "--credential":
+				i++
+				if i >= len(args) {
+					return fmt.Errorf("--credential needs KEY or KEY=VALUE")
+				}
+				raw := args[i]
+				if k, v, ok := strings.Cut(raw, "="); ok {
+					fmt.Fprintln(os.Stderr, "warn: --credential KEY=VALUE may appear in shell history/ps; prefer bare --credential KEY")
+					credentials[strings.TrimSpace(k)] = v
+				} else {
+					key := strings.TrimSpace(raw)
+					v, ok := os.LookupEnv(key)
+					if !ok || strings.TrimSpace(v) == "" {
+						return fmt.Errorf("--credential %s: env var not set on host", key)
+					}
+					credentials[key] = v
+				}
+			default:
+				return fmt.Errorf("unknown flag %q", args[i])
+			}
+		}
+		return a.ProviderUpdate(name, fromExisting, credentials)
 	case "list", "ls":
 		return a.ProviderList()
 	case "attach":
@@ -196,17 +253,56 @@ func runGateway(a *app.App, args []string) error {
 }
 
 func runLogs(a *app.App, args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: osg logs <name> [--follow]")
-	}
-	name := args[0]
-	follow := false
-	for _, a := range args[1:] {
-		if a == "--follow" || a == "-f" {
-			follow = true
+	opt := app.LogsOpts{}
+	var positional []string
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--follow", "-f", "--tail":
+			opt.Follow = true
+		case "--all":
+			opt.All = true
+		case "--since":
+			i++
+			if i >= len(args) {
+				return fmt.Errorf("--since needs a value (e.g. 5m or RFC3339)")
+			}
+			opt.Since = args[i]
+		case "--source":
+			i++
+			if i >= len(args) {
+				return fmt.Errorf("--source needs a value")
+			}
+			opt.Source = args[i]
+		case "--level":
+			i++
+			if i >= len(args) {
+				return fmt.Errorf("--level needs a value")
+			}
+			opt.Level = args[i]
+		case "--name":
+			i++
+			if i >= len(args) {
+				return fmt.Errorf("--name needs a value")
+			}
+			positional = append(positional, args[i])
+		default:
+			if strings.HasPrefix(args[i], "-") {
+				return fmt.Errorf("unknown flag %q", args[i])
+			}
+			// allow comma-separated: demo,agent2
+			for _, n := range strings.Split(args[i], ",") {
+				n = strings.TrimSpace(n)
+				if n != "" {
+					positional = append(positional, n)
+				}
+			}
 		}
 	}
-	return a.Logs(name, follow)
+	opt.Names = positional
+	if !opt.All && len(opt.Names) == 0 {
+		return fmt.Errorf("usage: osg logs <name>[,name…] [--follow|--tail] [--all] [--since 5m] [--source proxy] [--level warn]")
+	}
+	return a.LogsOpts(opt)
 }
 
 func runConnect(a *app.App, args []string) error {
@@ -482,6 +578,12 @@ func runSandbox(a *app.App, args []string) error {
 				opt.NoVolume = true
 			case "--no-host-internal":
 				opt.NoHostInternal = true
+			case "--provider":
+				i++
+				if i >= len(rest) {
+					return fmt.Errorf("--provider needs a profile id or instance name (e.g. github)")
+				}
+				opt.Providers = append(opt.Providers, rest[i])
 			default:
 				return fmt.Errorf("unknown flag %q", rest[i])
 			}

@@ -4,4 +4,7 @@
 /osg
 /osg-init
 /osg-gateway
+/osg-linux-*
+/osg-darwin-*
+/osg-windows-*
 .DS_Store

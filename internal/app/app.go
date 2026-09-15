@@ -2,11 +2,14 @@
 package app
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zorneth/osg-cli/internal/gwconfig"
@@ -371,6 +374,9 @@ type SandboxCreateOpts struct {
 	GPU            bool
 	CDIDevices     []string
 	Argv           []string // after `--`: create then exec (OpenShell-like)
+	// Providers are profile ids or existing instance names (OpenShell --provider).
+	// On create: discover host env, ensure gateway instance, compose policy before start, attach.
+	Providers []string
 }
 
 // SandboxCreate creates and starts a sandbox.
@@ -386,7 +392,17 @@ func (a *App) SandboxCreate(opt SandboxCreateOpts) error {
 	if name == "" {
 		name = filepath.Base(ws)
 	}
-	doc, policyPath, err := loadOrDenyAll(opt.Policy)
+	baseDoc, basePath, err := loadOrDenyAll(opt.Policy)
+	if err != nil {
+		return err
+	}
+	gwURL := opt.GatewayURL
+	if gwURL == "" {
+		if cfg, _, err := gwconfig.Load(); err == nil {
+			gwURL = gwconfig.CurrentURL(cfg)
+		}
+	}
+	attached, doc, policyPath, err := a.prepareProviders(baseDoc, basePath, opt.Providers, gwURL)
 	if err != nil {
 		return err
 	}
@@ -415,12 +431,6 @@ func (a *App) SandboxCreate(opt SandboxCreateOpts) error {
 	}
 	if !opt.NoHostInternal {
 		spec.ExtraHosts = []string{"host.osg.internal:host-gateway"}
-	}
-	gwURL := opt.GatewayURL
-	if gwURL == "" {
-		if cfg, _, err := gwconfig.Load(); err == nil {
-			gwURL = gwconfig.CurrentURL(cfg)
-		}
 	}
 	spec.GatewayURL = gwURL
 	displayURL := ""
@@ -472,7 +482,7 @@ func (a *App) SandboxCreate(opt SandboxCreateOpts) error {
 			return err
 		}
 		spec.ProxyBin = bin
-		spec.ProxyEnv = proxySecretsForPolicy(doc)
+		spec.ProxyEnv = append(proxySecretsForPolicy(doc), proxyGatewayEnv(opt.Name, gwURL)...)
 	}
 	h, err := a.Sandboxes.Create(ctx, sandbox.CreateOptions{
 		Spec:   spec,
@@ -484,17 +494,18 @@ func (a *App) SandboxCreate(opt SandboxCreateOpts) error {
 	if gwURL != "" {
 		cli := gatewayclient.New(gwURL)
 		baseYAML := ""
-		if b, err := os.ReadFile(policyPath); err == nil {
+		if b, err := os.ReadFile(basePath); err == nil {
 			baseYAML = string(b)
 		}
 		_ = cli.UpsertSandbox(ctx, gatewayclient.Sandbox{
-			Name:           h.Name,
-			ID:             string(h.ID),
-			Image:          h.Image,
-			Network:        h.Network,
-			Status:         "running",
-			Labels:         opt.Labels,
-			BasePolicyYAML: baseYAML,
+			Name:              h.Name,
+			ID:                string(h.ID),
+			Image:             h.Image,
+			Network:           h.Network,
+			Status:            "running",
+			Labels:            opt.Labels,
+			BasePolicyYAML:    baseYAML,
+			AttachedProviders: attached,
 		})
 	}
 	notes := []string{}
@@ -516,6 +527,9 @@ func (a *App) SandboxCreate(opt SandboxCreateOpts) error {
 	}
 	if gwURL != "" {
 		notes = append(notes, "gateway=registered")
+	}
+	if len(opt.Providers) > 0 {
+		notes = append(notes, "providers="+strings.Join(opt.Providers, ","))
 	}
 	fmt.Printf("sandbox create: ok name=%s id=%s network=%s image=%s %s\n",
 		h.Name, shortID(string(h.ID)), h.Network, h.Image, strings.Join(notes, " "))
@@ -632,22 +646,130 @@ func (a *App) SandboxConnect(name string, argv []string) error {
 	})
 }
 
-// Logs streams sandbox container logs.
+// LogsOpts configures observation log streaming.
+type LogsOpts struct {
+	Names  []string
+	Follow bool
+	All    bool
+	Since  string
+	Source string
+	Level  string
+}
+
+// Logs streams sandbox container logs to stdout.
 func (a *App) Logs(name string, follow bool) error {
+	return a.LogsOpts(LogsOpts{Names: []string{name}, Follow: follow})
+}
+
+// LogsOpts streams observation logs (gateway SSE preferred; docker fallback).
+func (a *App) LogsOpts(opt LogsOpts) error {
+	return a.LogsToOpts(context.Background(), opt, os.Stdout)
+}
+
+// LogsTo streams sandbox container logs to w (used by `osg term` live observation panel).
+func (a *App) LogsTo(ctx context.Context, name string, follow bool, w io.Writer) error {
+	return a.LogsToOpts(ctx, LogsOpts{Names: []string{name}, Follow: follow}, w)
+}
+
+// LogsToOpts streams one or more sandboxes.
+func (a *App) LogsToOpts(ctx context.Context, opt LogsOpts, w io.Writer) error {
+	if w == nil {
+		w = os.Stdout
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	names := opt.Names
+	if opt.All {
+		list, err := a.ListSandboxes()
+		if err == nil {
+			names = nil
+			for _, s := range list {
+				names = append(names, s.Name)
+			}
+		}
+	}
+	if len(names) == 0 {
+		return fmt.Errorf("logs: no sandbox names")
+	}
+	// Prefer gateway SSE when available.
+	if gw, err := currentGatewayURL(); err == nil && gw != "" {
+		c := gatewayclient.New(gw)
+		if _, err := c.Healthz(ctx); err == nil {
+			if opt.Follow {
+				return c.FollowLogs(ctx, names, opt.All, opt.Since, opt.Source, opt.Level, w)
+			}
+			// snapshot each; if gateway has nothing yet, fall through to docker
+			var any bool
+			for _, n := range names {
+				lines, err := c.GetLogsSnapshot(ctx, n, opt.Since, opt.Source, opt.Level)
+				if err != nil {
+					continue
+				}
+				for _, ln := range lines {
+					any = true
+					prefix := n
+					if len(names) == 1 {
+						prefix = ln.Source
+						if prefix == "" {
+							prefix = "proxy"
+						}
+					}
+					fmt.Fprintf(w, "[%s] %s\n", prefix, ln.Text)
+				}
+			}
+			if any {
+				return nil
+			}
+		}
+	}
+	// Docker fallback.
 	if a.Sandboxes == nil || a.Sandboxes.Driver == nil {
 		return fmt.Errorf("logs: docker not available")
 	}
-	ctx := context.Background()
-	if !follow {
+	if !opt.Follow {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, 2*time.Minute)
 		defer cancel()
 	}
-	info, err := a.Sandboxes.Driver.Inspect(ctx, name)
+	if len(names) > 1 {
+		var mu sync.Mutex
+		errCh := make(chan error, len(names))
+		for _, n := range names {
+			n := n
+			go func() {
+				pr, pw := io.Pipe()
+				go func() {
+					info, err := a.Sandboxes.Driver.Inspect(ctx, n)
+					if err != nil {
+						_ = pw.CloseWithError(err)
+						return
+					}
+					err = a.Sandboxes.Driver.Logs(ctx, info.ID, opt.Follow, pw)
+					_ = pw.CloseWithError(err)
+				}()
+				sc := bufio.NewScanner(pr)
+				for sc.Scan() {
+					mu.Lock()
+					_, _ = fmt.Fprintf(w, "[%s] %s\n", n, sc.Text())
+					mu.Unlock()
+				}
+				errCh <- sc.Err()
+			}()
+		}
+		var first error
+		for range names {
+			if err := <-errCh; err != nil && first == nil {
+				first = err
+			}
+		}
+		return first
+	}
+	info, err := a.Sandboxes.Driver.Inspect(ctx, names[0])
 	if err != nil {
 		return err
 	}
-	return a.Sandboxes.Driver.Logs(ctx, info.ID, follow, os.Stdout)
+	return a.Sandboxes.Driver.Logs(ctx, info.ID, opt.Follow, w)
 }
 
 // GatewayAdd registers a named gateway in config.
@@ -763,11 +885,17 @@ func (a *App) Exec(opt ExecOpts) error {
 	tty := opt.TTY
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
+	emitProc(opt.Name, "LAUNCH", strings.Join(opt.Argv, " "), 0)
 	res, err := a.Sandboxes.Exec(ctx, opt.Name, driver.ExecRequest{
 		Argv: opt.Argv,
 		TTY:  tty,
 		Env:  guestEnv,
 	})
+	code := 0
+	if res.ExitCode != 0 {
+		code = res.ExitCode
+	}
+	emitProc(opt.Name, "EXIT", strings.Join(opt.Argv, " "), code)
 	if err != nil {
 		return err
 	}
@@ -775,6 +903,24 @@ func (a *App) Exec(opt ExecOpts) error {
 		return &ExitError{Code: res.ExitCode}
 	}
 	return nil
+}
+
+func emitProc(sandbox, activity, details string, exitCode int) {
+	gw, err := currentGatewayURL()
+	if err != nil || gw == "" || sandbox == "" {
+		return
+	}
+	ts := time.Now().UTC()
+	text := fmt.Sprintf("%s OCSF PROC:%s [INFO] ALLOWED %s", ts.Format(time.RFC3339Nano), activity, details)
+	if activity == "EXIT" {
+		text = fmt.Sprintf("%s OCSF PROC:EXIT [INFO] ALLOWED %s [exit:%d]", ts.Format(time.RFC3339Nano), details, exitCode)
+	}
+	c := gatewayclient.New(gw)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = c.PostLogs(ctx, sandbox, []gatewayclient.LogLine{{
+		TS: ts, Source: "proc", Level: "INFO", Text: text,
+	}})
 }
 
 // RunOpts for osg run (ensure sandbox + exec).
@@ -865,7 +1011,7 @@ func (a *App) Run(opt RunOpts) error {
 				return err
 			}
 			spec.ProxyBin = bin
-			spec.ProxyEnv = proxySecretsForPolicy(doc)
+			spec.ProxyEnv = append(proxySecretsForPolicy(doc), proxyGatewayEnv(name, "")...)
 		}
 		h, err := a.Sandboxes.Create(ctx, sandbox.CreateOptions{
 			Spec:   spec,
@@ -901,9 +1047,12 @@ func (a *App) Run(opt RunOpts) error {
 
 // ProxyOpts for foreground host-side CONNECT proxy (debug / host-proxy mode).
 type ProxyOpts struct {
-	Listen string
-	Policy string
-	CAOut  string // write MITM CA PEM (for clients / sandbox trust)
+	Listen     string
+	Policy     string
+	CAOut      string // write MITM CA PEM (for clients / sandbox trust)
+	GatewayURL string // optional: pull secrets + push OCSF
+	Sandbox    string // sandbox name for gateway resolve/push
+	LogDir     string // optional daily OCSF file dir (default /var/log)
 }
 
 // Proxy runs osg-proxy until interrupted.
@@ -920,13 +1069,48 @@ func (a *App) Proxy(opt ProxyOpts) error {
 	if err := eng.Apply(doc); err != nil {
 		return err
 	}
-	srv := proxy.NewServer(&eng, os.Stderr)
+	logDir := opt.LogDir
+	if logDir == "" {
+		logDir = os.Getenv("OSG_LOG_DIR")
+	}
+	if logDir == "" {
+		logDir = "/var/log"
+	}
+	gwURL := opt.GatewayURL
+	if gwURL == "" {
+		gwURL = os.Getenv("OSG_GATEWAY_URL")
+	}
+	sandbox := opt.Sandbox
+	if sandbox == "" {
+		sandbox = os.Getenv("OSG_SANDBOX")
+	}
+	audit := proxy.NewMultiAudit(os.Stderr, logDir, gwURL, sandbox)
+	defer audit.Close()
+	srv := proxy.NewServer(&eng, audit)
+
+	// Prefer gateway-stored secrets; fall back to process env.
+	if gwURL != "" && sandbox != "" {
+		if err := refreshProxySecrets(srv, gwURL, sandbox); err != nil {
+			fmt.Fprintf(os.Stderr, "osg proxy: gateway secrets: %v (using process env)\n", err)
+		} else {
+			fmt.Fprintf(os.Stderr, "osg proxy: secrets loaded from gateway for sandbox %s\n", sandbox)
+		}
+		go func() {
+			t := time.NewTicker(30 * time.Second)
+			defer t.Stop()
+			for range t.C {
+				_ = refreshProxySecrets(srv, gwURL, sandbox)
+			}
+		}()
+	}
+
 	if ca := srv.CA(); ca != nil && opt.CAOut != "" {
 		if err := ca.WriteBundle(opt.CAOut); err != nil {
 			return fmt.Errorf("proxy ca-out: %w", err)
 		}
 		fmt.Fprintf(os.Stderr, "osg proxy: wrote MITM CA bundle to %s\n", opt.CAOut)
 	}
+	proxy.LifecycleReady(audit, "proxy ready on "+listen)
 	fmt.Fprintf(os.Stderr, "osg proxy: listening on %s (allow_rules=%d mitm_ca=%v)\n", listen, len(doc.AllowRules()), srv.CA() != nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -935,6 +1119,23 @@ func (a *App) Proxy(opt ProxyOpts) error {
 		fmt.Fprintf(os.Stderr, "osg proxy: watching policy %s for hot-reload\n", path)
 	}
 	return srv.ListenAndServe(ctx, listen)
+}
+
+func refreshProxySecrets(srv *proxy.Server, gwURL, sandbox string) error {
+	c := gatewayclient.New(gwURL)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	m, err := c.ResolveSecrets(ctx, sandbox)
+	if err != nil {
+		return err
+	}
+	// Merge with process env so non-provider keys still work.
+	store := proxy.LoadSecretsFromEnviron(os.Environ())
+	for k, v := range m {
+		store[k] = v
+	}
+	srv.SetSecrets(store)
+	return nil
 }
 
 func hostEnvForPolicy(doc policy.Document) []string {
@@ -954,6 +1155,30 @@ func proxySecretsForPolicy(doc policy.Document) []string {
 			out = append(out, k+"="+v)
 		}
 	}
+	return out
+}
+
+// proxyGatewayEnv adds OSG_GATEWAY_URL / OSG_SANDBOX so the sidecar can resolve
+// encrypted provider secrets and push OCSF logs (OpenShell-like).
+func proxyGatewayEnv(sandbox, gwURL string) []string {
+	var out []string
+	if gwURL == "" {
+		gwURL, _ = currentGatewayURL()
+	}
+	if gwURL == "" {
+		return out
+	}
+	// From inside Docker Desktop / Linux, host.osg.internal reaches the host gateway.
+	guestGW := gwURL
+	if u := strings.TrimSpace(gwURL); strings.Contains(u, "127.0.0.1") || strings.Contains(u, "localhost") {
+		guestGW = strings.Replace(u, "127.0.0.1", "host.osg.internal", 1)
+		guestGW = strings.Replace(guestGW, "localhost", "host.osg.internal", 1)
+	}
+	out = append(out, "OSG_GATEWAY_URL="+guestGW)
+	if sandbox != "" {
+		out = append(out, "OSG_SANDBOX="+sandbox)
+	}
+	out = append(out, "OSG_LOG_DIR=/var/log")
 	return out
 }
 
@@ -1061,7 +1286,7 @@ func (a *App) AgentLogin(name string) error {
 		if found == 0 {
 			return fmt.Errorf("agent login: set at least one of %s", strings.Join(keys, ", "))
 		}
-		fmt.Println("ok: keys will be injectable when listed in credentials.env_allow")
+		fmt.Println("ok: use --provider cursor (and --provider github if needed) on sandbox create")
 		fmt.Println("docs: docs/CURSOR.md")
 		return nil
 	default:
