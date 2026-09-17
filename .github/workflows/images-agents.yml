@@ -28,10 +28,41 @@ jobs:
   build:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         agent: [cursor, claude, codex]
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: osg-cli
+      - name: Checkout osg-runtime
+        uses: actions/checkout@v4
+        with:
+          repository: zorneth/osg-runtime
+          path: osg-runtime
+          ref: main
+      - name: Checkout osg-core
+        uses: actions/checkout@v4
+        with:
+          repository: zorneth/osg-core
+          path: osg-core
+          ref: main
+      - name: Checkout osg-driver
+        uses: actions/checkout@v4
+        with:
+          repository: zorneth/osg-driver
+          path: osg-driver
+          ref: main
+      - name: Checkout osg-proxy
+        uses: actions/checkout@v4
+        with:
+          repository: zorneth/osg-proxy
+          path: osg-proxy
+          ref: main
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+          cache: true
       - uses: docker/setup-buildx-action@v3
       - name: Login GHCR
         if: github.event_name != 'pull_request'
@@ -40,8 +71,18 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Pull base
-        run: docker pull "${{ env.BASE_IMAGE }}"
+      - name: Resolve base image
+        run: |
+          set -euo pipefail
+          if docker pull "${BASE_IMAGE}"; then
+            echo "Using published ${BASE_IMAGE}"
+            exit 0
+          fi
+          echo "Published base unavailable; building local ${BASE_IMAGE} from osg-runtime"
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -C osg-runtime -o images/sandbox/osg-init ./cmd/osg-init
+          docker build -t "${BASE_IMAGE}" --target cli \
+            -f osg-runtime/images/sandbox/Dockerfile \
+            osg-runtime/images/sandbox
       - name: Meta
         id: meta
         uses: docker/metadata-action@v5
@@ -55,8 +96,8 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: docker/agents/${{ matrix.agent }}
-          file: docker/agents/${{ matrix.agent }}/Dockerfile
+          context: osg-cli/docker/agents/${{ matrix.agent }}
+          file: osg-cli/docker/agents/${{ matrix.agent }}/Dockerfile
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
