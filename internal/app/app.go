@@ -829,7 +829,7 @@ func (a *App) SandboxCreate(opt SandboxCreateOpts) error {
 		spec.Env = append(spec.Env, k+"="+v)
 	}
 	if !opt.NoHostInternal {
-		spec.ExtraHosts = []string{"host.osg.internal:host-gateway"}
+		spec.ExtraHosts = dockerdriver.HostGatewayExtraHosts()
 	}
 	spec.GatewayURL = gwURL
 	displayURL := ""
@@ -1344,6 +1344,8 @@ func (a *App) Exec(opt ExecOpts) error {
 	// Always overlay credential placeholders from effective policy so attach/refresh
 	// works without recreating the container (Docker Config.Env is immutable).
 	guestEnv := a.credentialPlaceholdersForSandbox(opt.Name)
+	// git ignores SSL_CERT_FILE; older sandboxes lack GIT_SSL_CAINFO at create-time.
+	guestEnv = mergeEnvEntries(guestEnv, sidecar.CABundleEnv(defaults.GuestCAFile))
 	guestEnv = mergeEnvEntries(guestEnv, opt.Env)
 	tty := opt.TTY
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
@@ -1434,7 +1436,7 @@ func (a *App) Run(opt RunOpts) error {
 			PolicyPath:    policyPath,
 			NoHarden:      opt.NoHarden,
 			PersistVolume: true,
-			ExtraHosts:    []string{"host.osg.internal:host-gateway"},
+			ExtraHosts:    dockerdriver.HostGatewayExtraHosts(),
 		}
 		if display.ParseMode(opt.Display) == display.ModeNoVNC ||
 			(doc.Display != nil && display.ParseMode(doc.Display.Mode) == display.ModeNoVNC) {
@@ -1557,7 +1559,10 @@ func (a *App) Proxy(opt ProxyOpts) error {
 	srv := proxy.NewServer(&eng, audit)
 
 	// Prefer gateway-stored secrets; fall back to process env.
+	// OpenShell-style: OSG_GATEWAY_URL must resolve via ExtraHosts
+	// (host.osg.internal → host-gateway). No hostname guessing.
 	if gwURL != "" && sandbox != "" {
+		gwURL = GuestGatewayURL(gwURL)
 		if err := refreshProxySecrets(srv, gwURL, sandbox); err != nil {
 			fmt.Fprintf(os.Stderr, "osg proxy: gateway secrets: %v (using process env)\n", err)
 		} else {
@@ -1615,6 +1620,19 @@ func refreshProxySecrets(srv *proxy.Server, gwURL, sandbox string) error {
 	}
 	srv.SetSecrets(store)
 	return nil
+}
+
+// GuestGatewayURL rewrites loopback (and legacy host.docker.internal) gateway URLs
+// to host.osg.internal — the OpenShell-style host-gateway alias injected via ExtraHosts.
+func GuestGatewayURL(gwURL string) string {
+	u := strings.TrimSpace(gwURL)
+	if u == "" {
+		return u
+	}
+	u = strings.Replace(u, "127.0.0.1", "host.osg.internal", 1)
+	u = strings.Replace(u, "localhost", "host.osg.internal", 1)
+	u = strings.Replace(u, "host.docker.internal", "host.osg.internal", 1)
+	return u
 }
 
 // gatewayAuditPusher adapts gatewayclient to proxy.LogPusher.
@@ -1765,13 +1783,7 @@ func proxyGatewayEnv(sandbox, gwURL string) []string {
 	if gwURL == "" {
 		return out
 	}
-	// From inside Docker Desktop / Linux, host.docker.internal reaches the host
-	// gateway. Also keep host.osg.internal when ExtraHosts is set on the sidecar.
-	guestGW := gwURL
-	if u := strings.TrimSpace(gwURL); strings.Contains(u, "127.0.0.1") || strings.Contains(u, "localhost") {
-		guestGW = strings.Replace(u, "127.0.0.1", "host.docker.internal", 1)
-		guestGW = strings.Replace(guestGW, "localhost", "host.docker.internal", 1)
-	}
+	guestGW := GuestGatewayURL(gwURL)
 	out = append(out, "OSG_GATEWAY_URL="+guestGW)
 	if sandbox != "" {
 		out = append(out, "OSG_SANDBOX="+sandbox)

@@ -139,27 +139,6 @@ network_policies:
       ports:
       - 80
       - 443
-  ubuntu-archive:
-    name: ubuntu-archive
-    endpoints:
-    - host: archive.ubuntu.com
-      ports:
-      - 80
-      - 443
-  ubuntu-security:
-    name: ubuntu-security
-    endpoints:
-    - host: security.ubuntu.com
-      ports:
-      - 80
-      - 443
-  ubuntu-ports:
-    name: ubuntu-ports
-    endpoints:
-    - host: ports.ubuntu.com
-      ports:
-      - 80
-      - 443
   github-git-zorneth:
     name: github-git-zorneth
     endpoints:

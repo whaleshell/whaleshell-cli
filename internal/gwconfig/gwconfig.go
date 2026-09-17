@@ -123,7 +123,6 @@ func ResolveImage(from, explicit string) (string, error) {
 		return img, nil
 	}
 	builtins := map[string]string{
-		"ubuntu": "ubuntu:24.04",
 		"debian": defaults.ImageDebian,
 		// osg catalog shorts (local). GHCR paths when OSG_USE_GHCR=1.
 		"base":    defaults.ImageLocal,
