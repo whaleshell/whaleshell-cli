@@ -109,7 +109,7 @@ func (a *App) Banner() string {
 }
 
 // Version reports the CLI stub version.
-func (a *App) Version() string { return "osg 0.0.0-dev" }
+func (a *App) Version() string { return "osg 0.1.0-alpha.1" }
 
 // Health probes Docker Engine / Podman API.
 func (a *App) Health() error {

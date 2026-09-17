@@ -5,13 +5,13 @@ go 1.27.0
 require (
 	github.com/charmbracelet/bubbletea v1.3.4
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/zorneth/osg-core v0.0.0
-	github.com/zorneth/osg-display v0.0.0
-	github.com/zorneth/osg-driver v0.0.0
-	github.com/zorneth/osg-providers v0.0.0
-	github.com/zorneth/osg-proxy v0.0.0
-	github.com/zorneth/osg-runtime v0.0.0
-	github.com/zorneth/osg-sdk v0.0.0
+	github.com/zorneth/osg-core v0.1.0-alpha.1
+	github.com/zorneth/osg-display v0.1.0-alpha.1
+	github.com/zorneth/osg-driver v0.1.0-alpha.1
+	github.com/zorneth/osg-providers v0.1.0-alpha.1
+	github.com/zorneth/osg-proxy v0.1.0-alpha.1
+	github.com/zorneth/osg-runtime v0.1.0-alpha.1
+	github.com/zorneth/osg-sdk v0.1.0-alpha.1
 	golang.org/x/crypto v0.56.0
 	golang.org/x/term v0.46.0
 	gopkg.in/yaml.v3 v3.0.1
