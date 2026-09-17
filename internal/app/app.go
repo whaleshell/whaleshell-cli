@@ -44,7 +44,7 @@ type App struct {
 	Sandboxes  *sandbox.Manager
 	Display    display.Stack
 	Docker     *dockerdriver.Driver // Engine API client (Docker or Podman)
-	DriverName string         // "docker" | "podman" | "vm" | "kubernetes"
+	DriverName string               // "docker" | "podman" | "vm" | "kubernetes"
 
 	// OpenShell global session (ApplyGlobal).
 	OutputFormat        string

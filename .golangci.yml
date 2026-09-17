@@ -11,10 +11,9 @@ linters:
     - ineffassign
     - staticcheck
     - unused
-
-issues:
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - staticcheck
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - staticcheck
 

@@ -320,6 +320,8 @@ jobs:
       - name: Test (race)
         if: matrix.os != 'windows-latest'
         shell: bash
+        env:
+          CGO_ENABLED: "1"
         run: go test -race -count=1 ./...
       - name: Test
         if: matrix.os == 'windows-latest'
