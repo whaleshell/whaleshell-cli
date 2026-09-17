@@ -22,6 +22,16 @@ type File struct {
 type Gateway struct {
 	URL     string `yaml:"url"`
 	DataDir string `yaml:"data_dir,omitempty"`
+	Token   string `yaml:"token,omitempty"` // access token (local-dev or OIDC)
+
+	// OIDC (OpenShell-compatible gateway add flags).
+	OIDCIssuer       string `yaml:"oidc_issuer,omitempty"`
+	OIDCClientID     string `yaml:"oidc_client_id,omitempty"`
+	OIDCAudience     string `yaml:"oidc_audience,omitempty"`
+	OIDCScopes       string `yaml:"oidc_scopes,omitempty"`
+	OIDCAllowHTTP    bool   `yaml:"oidc_allow_insecure_http,omitempty"`
+	RefreshToken     string `yaml:"refresh_token,omitempty"`
+	TokenExpiresAtMS int64  `yaml:"token_expires_at_ms,omitempty"`
 }
 
 // Path returns the default config path.
@@ -120,7 +130,10 @@ func ResolveImage(from, explicit string) (string, error) {
 		"cursor":           defaults.ImageCursor,
 		"claude":           defaults.ImageClaude,
 		"codex":            defaults.ImageCodex,
-		"community/ollama": "ollama/ollama:latest",
+		"base":             "ghcr.io/nvidia/openshell-community/sandboxes/base:latest",
+		"ollama":           "ghcr.io/nvidia/openshell-community/sandboxes/ollama:latest",
+		"community/ollama": "ghcr.io/nvidia/openshell-community/sandboxes/ollama:latest",
+		"community/base":   "ghcr.io/nvidia/openshell-community/sandboxes/base:latest",
 	}
 	if img, ok := builtins[from]; ok {
 		return img, nil

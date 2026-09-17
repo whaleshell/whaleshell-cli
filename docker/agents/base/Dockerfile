@@ -1,8 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 lkmavi
 # SPDX-License-Identifier: MIT
 #
-# Thin Debian base for agent images (parity with osg-runtime images/sandbox:cli).
-# Keep package list in sync with osg-runtime/images/sandbox Dockerfile target cli.
+# Thin Debian base for agent images.
+# Prefer `task runtime:image:cli` (osg-sandbox:local) — OpenShell-like toolset
+# (python/node/gh/agents) lives in osg-runtime/images/sandbox Dockerfile target cli.
+# This file remains a minimal fallback for agent-layer Dockerfiles.
 
 ARG DEBIAN_BASE=debian:bookworm
 FROM ${DEBIAN_BASE}

@@ -13,7 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/zorneth/osg-cli/internal/app"
-	"github.com/zorneth/osg-runtime/driver"
+	"github.com/zorneth/osg-driver/driver"
 )
 
 var (

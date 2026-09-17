@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/zorneth/osg-core/defaults"
 )
 
 // InstallOpts for `osg install`.
@@ -59,6 +61,11 @@ func (a *App) Install(opt InstallOpts) error {
 		fmt.Printf("  export PATH=\"%s:$PATH\"\n", linkDir)
 	} else {
 		fmt.Println("install: ok — run `osg version` from any directory")
+	}
+	if err := a.GatewayEnsure(); err != nil {
+		fmt.Fprintf(os.Stderr, "install: gateway ensure: %v\n", err)
+		fmt.Fprintf(os.Stderr, "install: start manually: osg-gateway --listen %s\n", defaults.GatewayListen)
+		return nil
 	}
 	return nil
 }

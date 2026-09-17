@@ -6,6 +6,8 @@ import (
 	"crypto/rand"
 	"encoding/pem"
 	"fmt"
+	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,9 +16,10 @@ import (
 
 	"github.com/zorneth/osg-cli/internal/gwconfig"
 	"github.com/zorneth/osg-core/defaults"
-	"github.com/zorneth/osg-runtime/driver"
-	"github.com/zorneth/osg-runtime/gatewayclient"
-	"github.com/zorneth/osg-runtime/sidecar"
+	"github.com/zorneth/osg-driver/driver"
+	"github.com/zorneth/osg-driver/mounts"
+	"github.com/zorneth/osg-driver/sidecar"
+	"github.com/zorneth/osg-sdk/gatewayclient"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -84,6 +87,9 @@ func (a *App) Copy(src, dst string) error {
 	dName, dPath, dOK := splitSandboxPath(dst)
 	switch {
 	case !sOK && dOK:
+		if err := mounts.ValidateUploadDest(dPath); err != nil {
+			return fmt.Errorf("cp: %w", err)
+		}
 		info, err := a.Sandboxes.Driver.Inspect(ctx, dName)
 		if err != nil {
 			return err
@@ -171,6 +177,64 @@ func (a *App) ConnectSSH(name string, open bool) error {
 	)
 	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
 	return c.Run()
+}
+
+// SandboxSSHProxy dials the sandbox SSH port and bridges stdio (ProxyCommand).
+func (a *App) SandboxSSHProxy(name string) error {
+	if a.Sandboxes == nil || a.Sandboxes.Driver == nil {
+		return fmt.Errorf("ssh-proxy: docker not available")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	info, err := a.Sandboxes.Driver.Inspect(ctx, name)
+	if err != nil {
+		return err
+	}
+	port, err := a.Sandboxes.Driver.SSHPort(ctx, info.ID)
+	if err != nil {
+		return fmt.Errorf("ssh-proxy: enable SSH with --ssh on create: %w", err)
+	}
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 10*time.Second)
+	if err != nil {
+		return fmt.Errorf("ssh-proxy: dial: %w", err)
+	}
+	defer conn.Close()
+	errCh := make(chan error, 2)
+	go func() {
+		_, err := io.Copy(conn, os.Stdin)
+		errCh <- err
+	}()
+	go func() {
+		_, err := io.Copy(os.Stdout, conn)
+		errCh <- err
+	}()
+	return <-errCh
+}
+
+// SandboxSSHConfig prints an OpenShell-style SSH Host block for a sandbox.
+func (a *App) SandboxSSHConfig(name string) error {
+	if a.Sandboxes == nil || a.Sandboxes.Driver == nil {
+		return fmt.Errorf("ssh-config: docker not available")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	info, err := a.Sandboxes.Driver.Inspect(ctx, name)
+	if err != nil {
+		return err
+	}
+	port, err := a.Sandboxes.Driver.SSHPort(ctx, info.ID)
+	if err != nil {
+		return fmt.Errorf("ssh-config: enable SSH with --ssh on create: %w", err)
+	}
+	host := "osg-" + name
+	fmt.Printf("Host %s\n", host)
+	fmt.Printf("  HostName 127.0.0.1\n")
+	fmt.Printf("  Port %d\n", port)
+	fmt.Printf("  User osg\n")
+	fmt.Printf("  StrictHostKeyChecking no\n")
+	fmt.Printf("  UserKnownHostsFile /dev/null\n")
+	fmt.Printf("# append: osg sandbox ssh-config %s >> ~/.ssh/config\n", name)
+	return nil
 }
 
 // StartRelayAgent copies osg-agent into the sandbox and starts it against the gateway.

@@ -1,7 +1,10 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026 lkmavi
+# SPDX-FileCopyrightText: Copyright (c) 2026 zorneth
 # SPDX-License-Identifier: MIT
 #
-# Cursor-oriented sandbox policy (C1 agent-in-sandbox / C2 host IDE + workdir).
+# Cursor Agent + GitHub write (zorneth) in one base policy.
+# Use with: --from cursor --provider gh -- agent
+# Cursor endpoints live in base (not only provider composition) so agent works
+# even before/without a cursor provider instance. gh provider still supplies tokens.
 
 version: 1
 filesystem_policy:
@@ -155,6 +158,110 @@ network_policies:
       ports:
       - 80
       - 443
+  github-git-zorneth:
+    name: github-git-zorneth
+    endpoints:
+    - host: github.com
+      port: 443
+      protocol: rest
+      tls: terminate
+      enforcement: enforce
+      credential_keys:
+      - GITHUB_TOKEN
+      - GH_TOKEN
+      rules:
+      - allow:
+          method: GET
+          path: /zorneth/**
+      - allow:
+          method: HEAD
+          path: /zorneth/**
+      - allow:
+          method: OPTIONS
+          path: /zorneth/**
+      - allow:
+          method: POST
+          path: /zorneth/**/git-upload-pack
+      - allow:
+          method: POST
+          path: /zorneth/**/git-receive-pack
+    binaries:
+    - path: /usr/bin/git
+    - path: /usr/local/bin/git
+  github-api-zorneth:
+    name: github-api-zorneth
+    endpoints:
+    - host: api.github.com
+      port: 443
+      protocol: rest
+      tls: terminate
+      enforcement: enforce
+      credential_keys:
+      - GITHUB_TOKEN
+      - GH_TOKEN
+      rules:
+      - allow:
+          method: GET
+          path: /repos/zorneth/**
+      - allow:
+          method: HEAD
+          path: /repos/zorneth/**
+      - allow:
+          method: POST
+          path: /repos/zorneth/**
+      - allow:
+          method: PUT
+          path: /repos/zorneth/**
+      - allow:
+          method: PATCH
+          path: /repos/zorneth/**
+      - allow:
+          method: DELETE
+          path: /repos/zorneth/**
+      - allow:
+          method: POST
+          path: /orgs/zorneth/repos
+      - allow:
+          method: GET
+          path: /orgs/zorneth
+      - allow:
+          method: GET
+          path: /orgs/zorneth/**
+      - allow:
+          method: POST
+          path: /user/repos
+      - allow:
+          method: GET
+          path: /user
+      - allow:
+          method: GET
+          path: /user/**
+    binaries:
+    - path: /usr/bin/gh
+    - path: /usr/local/bin/gh
+    - path: /usr/bin/curl
+    - path: /usr/local/bin/curl
+    - path: /usr/bin/git
+    - path: /usr/local/bin/git
+    - path: /usr/bin/agent
+    - path: /usr/local/bin/agent
+    - path: /opt/cursor-agent/versions/*/node
+  github-graphql:
+    name: github-graphql
+    endpoints:
+    - host: api.github.com
+      port: 443
+      path: /graphql
+      protocol: graphql
+      tls: terminate
+      access: read-write
+      enforcement: enforce
+      credential_keys:
+      - GITHUB_TOKEN
+      - GH_TOKEN
+    binaries:
+    - path: /usr/bin/gh
+    - path: /usr/local/bin/gh
 inference:
   providers:
   - anthropic
@@ -170,5 +277,6 @@ credentials:
   - TERM
   - LANG
   - COLORTERM
-  - DISPLAY
+  - GITHUB_TOKEN
+  - GH_TOKEN
   write_to_disk: false

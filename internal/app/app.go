@@ -12,24 +12,32 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zorneth/osg-cli/internal/autoprovider"
 	"github.com/zorneth/osg-cli/internal/gwconfig"
+	"github.com/zorneth/osg-cli/internal/osargs"
+	"github.com/zorneth/osg-cli/internal/policywait"
+	"github.com/zorneth/osg-cli/internal/templates"
 	"github.com/zorneth/osg-cli/internal/ui"
 	"github.com/zorneth/osg-core/defaults"
 	"github.com/zorneth/osg-core/engine"
+	"github.com/zorneth/osg-core/env"
 	"github.com/zorneth/osg-core/policy"
 	"github.com/zorneth/osg-display"
-	"github.com/zorneth/osg-runtime/driver"
-	"github.com/zorneth/osg-runtime/driver/docker"
-	"github.com/zorneth/osg-runtime/driver/kubernetes"
-	"github.com/zorneth/osg-runtime/driver/podman"
-	"github.com/zorneth/osg-runtime/driver/vm"
-	"github.com/zorneth/osg-runtime/env"
-	"github.com/zorneth/osg-runtime/gatewayclient"
+	"github.com/zorneth/osg-driver/driver"
+	"github.com/zorneth/osg-driver/driver/docker"
+	dockerdriver "github.com/zorneth/osg-driver/driver/docker"
+	"github.com/zorneth/osg-driver/driver/kubernetes"
+	"github.com/zorneth/osg-driver/driver/podman"
+	"github.com/zorneth/osg-driver/driver/vm"
+	"github.com/zorneth/osg-driver/mounts"
+	"github.com/zorneth/osg-driver/sidecar"
+	"github.com/zorneth/osg-proxy/proxy"
 	"github.com/zorneth/osg-runtime/inference"
-	"github.com/zorneth/osg-runtime/proxy"
 	"github.com/zorneth/osg-runtime/sandbox"
-	"github.com/zorneth/osg-runtime/sidecar"
+	"github.com/zorneth/osg-runtime/secrets"
+	"github.com/zorneth/osg-sdk/gatewayclient"
 	"golang.org/x/term"
+	"gopkg.in/yaml.v3"
 )
 
 // App holds constructed dependencies for CLI commands.
@@ -38,6 +46,12 @@ type App struct {
 	Display    display.Stack
 	Docker     *docker.Driver // Engine API client (Docker or Podman)
 	DriverName string         // "docker" | "podman" | "vm" | "kubernetes"
+
+	// OpenShell global session (ApplyGlobal).
+	OutputFormat        string
+	GlobalWorkspace     string
+	GatewayURLOverride  string
+	GatewayNameOverride string
 }
 
 // New builds the default host-side graph.
@@ -132,9 +146,78 @@ func (a *App) Health() error {
 	probe := a.probeLandlock(probeCtx)
 	fmt.Printf("  landlock:         %s\n", probe)
 	fmt.Printf("  seccomp:          %s\n", docker.SeccompNote())
+	for _, img := range []string{defaults.ImageLocal, defaults.ImageCursor} {
+		ok := a.Docker.ImagePresent(ctx, img)
+		state := "missing (task runtime:image:cli / task docker:agent:cursor)"
+		if ok {
+			state = "present"
+		}
+		fmt.Printf("  image %-18s %s\n", img+":", state)
+	}
+	if u, err := a.currentGatewayURL(); err == nil && u != "" {
+		gctx, gcancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer gcancel()
+		cli := gatewayclient.New(u)
+		if _, err := cli.Healthz(gctx); err != nil {
+			fmt.Printf("  gateway:          unreachable (%s)\n", u)
+		} else {
+			fmt.Printf("  gateway:          ok (%s)\n", u)
+			if info, err := cli.Info(gctx); err == nil {
+				printSecretsKEK(info)
+			}
+		}
+	} else {
+		fmt.Printf("  gateway:          not selected (osg gateway ensure)\n")
+	}
 	if envTruthy("OSG_LANDLOCK_REQUIRED") && !landlockABIAtLeast(probe, 1) {
 		return fmt.Errorf("health: landlock gate failed (need ABI≥1; got %s). Unset OSG_LANDLOCK_REQUIRED on Docker Desktop / ABI 0 hosts", probe)
 	}
+	return nil
+}
+
+func printSecretsKEK(info map[string]any) {
+	raw, ok := info["secrets_kek"].(map[string]any)
+	if !ok {
+		return
+	}
+	src, _ := raw["source"].(string)
+	pinned, _ := raw["pinned"].(bool)
+	fmt.Printf("  secrets_kek:      source=%s pinned=%v\n", src, pinned)
+	if w, _ := raw["warning"].(string); strings.TrimSpace(w) != "" {
+		fmt.Printf("  secrets_kek.warn: %s\n", w)
+	}
+}
+
+// Doctor is the production Docker-path readiness check (OpenShell doctor alias).
+func (a *App) Doctor() error {
+	if err := a.Health(); err != nil {
+		return err
+	}
+	u, err := a.currentGatewayURL()
+	if err != nil || u == "" {
+		return fmt.Errorf("doctor: no gateway selected (osg gateway ensure|add|select)")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cli := gatewayclient.New(u)
+	info, err := cli.Info(ctx)
+	if err != nil {
+		return fmt.Errorf("doctor: gateway info: %w", err)
+	}
+	if raw, ok := info["secrets_kek"].(map[string]any); ok {
+		if pinned, _ := raw["pinned"].(bool); !pinned {
+			fmt.Fprintf(os.Stderr, "doctor: warn: pin %s in compose/env so secrets survive volume loss\n", secrets.EnvKEK)
+		}
+	}
+	providers, err := cli.ListProviders(ctx)
+	if err != nil {
+		return fmt.Errorf("doctor: list providers: %w", err)
+	}
+	fmt.Printf("  providers:        %d instance(s)\n", len(providers))
+	for _, p := range providers {
+		fmt.Printf("    - %s type=%s env=%v\n", p.Name, p.Type, p.EnvVars)
+	}
+	fmt.Printf("doctor: ok (docker path)\n")
 	return nil
 }
 
@@ -177,7 +260,7 @@ func (a *App) PolicyCheck(path string) error {
 	if err != nil {
 		return fmt.Errorf("policy check: %w", err)
 	}
-	doc, err = mergeGatewayGlobal(doc)
+	doc, err = a.mergeGatewayGlobal(doc)
 	if err != nil {
 		return fmt.Errorf("policy check: %w", err)
 	}
@@ -190,7 +273,7 @@ func (a *App) PolicyCheck(path string) error {
 	}
 	fmt.Printf("policy check: ok version=%d harden=%s allow_rules=%d include_workdir=%v",
 		doc.Version, doc.HardenMode(), len(doc.AllowRules()),
-		doc.Filesystem != nil && doc.Filesystem.IncludeWorkdir)
+		doc.IncludeWorkdir())
 	if doc.Inference != nil && len(doc.Inference.Providers) > 0 {
 		fmt.Printf(" inference=%v", doc.Inference.Providers)
 	}
@@ -206,11 +289,11 @@ func (a *App) PolicyCheck(path string) error {
 
 // PolicyGlobalGet prints gateway global policy YAML.
 func (a *App) PolicyGlobalGet() error {
-	u, err := currentGatewayURL()
+	u, err := a.currentGatewayURL()
 	if err != nil {
 		return err
 	}
-	b, err := gatewayclient.New(u).GetGlobalPolicy(context.Background())
+	b, err := gatewayclient.NewWithToken(u, a.gatewayTokenForURL(u)).GetGlobalPolicy(context.Background())
 	if err != nil {
 		return err
 	}
@@ -223,7 +306,7 @@ func (a *App) PolicyGlobalGet() error {
 
 // PolicyGlobalSet uploads YAML file as gateway global policy.
 func (a *App) PolicyGlobalSet(path string) error {
-	u, err := currentGatewayURL()
+	u, err := a.currentGatewayURL()
 	if err != nil {
 		return err
 	}
@@ -238,37 +321,102 @@ func (a *App) PolicyGlobalSet(path string) error {
 	if err := doc.Validate(); err != nil {
 		return err
 	}
-	if err := gatewayclient.New(u).PutGlobalPolicy(context.Background(), b); err != nil {
+	if err := gatewayclient.NewWithToken(u, a.gatewayTokenForURL(u)).PutGlobalPolicy(context.Background(), b); err != nil {
 		return err
 	}
 	fmt.Printf("policy global set: ok url=%s bytes=%d\n", u, len(b))
 	return nil
 }
 
-// PolicySet writes a new policy YAML onto the host bind used by sandbox+proxy.
-// The proxy watches the file and hot-reloads (in-place overwrite keeps the bind inode).
-func (a *App) PolicySet(sandboxName, path string) error {
-	if a.Docker == nil {
-		return fmt.Errorf("policy set: docker not available")
-	}
-	doc, err := policy.Load(path)
+// PolicyGlobalClear removes the gateway-global policy lock.
+func (a *App) PolicyGlobalClear() error {
+	u, err := a.currentGatewayURL()
 	if err != nil {
-		return fmt.Errorf("policy set: %w", err)
+		return err
 	}
-	doc, err = mergeGatewayGlobal(doc)
+	if err := gatewayclient.NewWithToken(u, a.gatewayTokenForURL(u)).PutGlobalPolicy(context.Background(), nil); err != nil {
+		return err
+	}
+	fmt.Println("policy delete --global: ok")
+	return nil
+}
+
+// PolicySet stores sandbox base policy; the gateway builds the effective
+// candidate via composition (base + provider-composed profiles) — OpenShell-style.
+//
+// Requires the sandbox to be registered on the current gateway (create/register).
+// Without a gateway, falls back to writing the file directly (no composition).
+// When wait is true, blocks until the bind file matches and settle elapsed.
+func (a *App) PolicySet(sandboxName, path string, wait bool) error {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	doc, err := policy.Parse(b)
 	if err != nil {
 		return fmt.Errorf("policy set: %w", err)
 	}
 	if err := doc.Validate(); err != nil {
 		return fmt.Errorf("policy set: %w", err)
 	}
+
+	var appliedHost string
+	var appliedBytes []byte
+
+	if gw, err := a.currentGatewayURL(); err == nil && gw != "" {
+		c := gatewayclient.NewWithToken(gw, a.gatewayTokenForURL(gw))
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if _, err := c.Healthz(ctx); err == nil {
+			eff, stripped, err := c.PutSandboxPolicy(ctx, sandboxName, b)
+			if err != nil {
+				return fmt.Errorf("policy set: %w", err)
+			}
+			if stripped > 0 {
+				fmt.Printf("policy set: stripped %d provider-composed rule(s) from base (prefer policy get --base)\n", stripped)
+			}
+			effDoc, err := policy.Parse(eff)
+			if err != nil {
+				return fmt.Errorf("policy set: effective: %w", err)
+			}
+			var eng engine.Allowlist
+			if err := eng.Apply(effDoc); err != nil {
+				return fmt.Errorf("policy set: engine: %w", err)
+			}
+			if a.Docker != nil {
+				hostPath, err := a.Docker.PolicyHostPath(ctx, sandboxName)
+				if err != nil {
+					return fmt.Errorf("policy set: gateway stored base, but live bind: %w (run: osg provider effective %s | …)", err, sandboxName)
+				}
+				if err := writeFileInPlace(hostPath, eff); err != nil {
+					return fmt.Errorf("policy set: write %s: %w", hostPath, err)
+				}
+				appliedHost, appliedBytes = hostPath, eff
+				fmt.Printf("policy set: ok sandbox=%s base stored; effective policy applied (rules=%d) host=%s\n",
+					sandboxName, len(effDoc.AllowRules()), hostPath)
+			} else {
+				fmt.Printf("policy set: ok sandbox=%s base stored; effective policy ready (rules=%d, no docker bind)\n",
+					sandboxName, len(effDoc.AllowRules()))
+			}
+			if wait {
+				return a.waitPolicy(appliedHost, appliedBytes)
+			}
+			return nil
+		}
+	}
+
+	// No gateway: overwrite bind file as-is (no composition).
+	fmt.Fprintln(os.Stderr, "policy set: warn: no gateway — writing file directly (no provider composition)")
+	doc, err = a.mergeGatewayGlobal(doc)
+	if err != nil {
+		return fmt.Errorf("policy set: %w", err)
+	}
 	var eng engine.Allowlist
 	if err := eng.Apply(doc); err != nil {
 		return fmt.Errorf("policy set: engine: %w", err)
 	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return err
+	if a.Docker == nil {
+		return fmt.Errorf("policy set: docker not available")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -281,6 +429,167 @@ func (a *App) PolicySet(sandboxName, path string) error {
 	}
 	fmt.Printf("policy set: ok sandbox=%s host=%s allow_rules=%d (proxy reloads within ~1s)\n",
 		sandboxName, hostPath, len(doc.AllowRules()))
+	if wait {
+		return a.waitPolicy(hostPath, b)
+	}
+	return nil
+}
+
+func (a *App) waitPolicy(hostPath string, want []byte) error {
+	if hostPath == "" || len(want) == 0 {
+		fmt.Println("policy set: --wait skipped (no live bind path)")
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if err := policywait.FileApplied(ctx, hostPath, want, policywait.Options{}); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return &ExitError{Code: policywait.ExitCode(err)}
+	}
+	fmt.Println("policy set: wait ok (file settled)")
+	return nil
+}
+
+// PolicyUpdate applies incremental network changes to the sandbox base policy.
+func (a *App) PolicyUpdate(sandbox string, endpoints, allows, denies, binaries []string, wait bool) error {
+	c, err := a.gatewayClient()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	baseYAML, err := c.GetSandboxPolicy(ctx, sandbox, "base")
+	if err != nil {
+		return err
+	}
+	doc, err := policy.Parse(baseYAML)
+	if err != nil {
+		return fmt.Errorf("policy update: parse base: %w", err)
+	}
+	u := policy.NetworkUpdate{Binaries: binaries}
+	for _, s := range endpoints {
+		ep, err := policy.ParseEndpointSpec(s)
+		if err != nil {
+			return err
+		}
+		u.AddEndpoints = append(u.AddEndpoints, ep)
+	}
+	for _, s := range allows {
+		mp, err := policy.ParseMethodPathSpec(s)
+		if err != nil {
+			return err
+		}
+		u.AddAllows = append(u.AddAllows, mp)
+	}
+	for _, s := range denies {
+		mp, err := policy.ParseMethodPathSpec(s)
+		if err != nil {
+			return err
+		}
+		u.AddDenies = append(u.AddDenies, mp)
+	}
+	out, err := policy.ApplyNetworkUpdate(doc, u)
+	if err != nil {
+		return err
+	}
+	raw, err := yamlMarshalDoc(out)
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp("", "osg-policy-update-*.yaml")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err := tmp.Write(raw); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return a.PolicySet(sandbox, tmpPath, wait)
+}
+
+func yamlMarshalDoc(doc policy.Document) ([]byte, error) {
+	return yaml.Marshal(doc)
+}
+
+// PolicyList prints policy revision metadata.
+func (a *App) PolicyList(sandbox string) error {
+	c, err := a.gatewayClient()
+	if err != nil {
+		return err
+	}
+	revs, err := c.ListPolicyRevisions(context.Background(), sandbox)
+	if err != nil {
+		return err
+	}
+	if len(revs) == 0 {
+		fmt.Println("policy list: (none)")
+		return nil
+	}
+	for _, r := range revs {
+		fmt.Printf("rev=%d status=%s bytes=%d at=%s\n", r.Rev, r.Status, r.Bytes, r.UpdatedAt.Format(time.RFC3339))
+	}
+	return nil
+}
+
+// PolicyGetRevision prints base YAML for a historical revision.
+func (a *App) PolicyGetRevision(sandbox string, rev int) error {
+	c, err := a.gatewayClient()
+	if err != nil {
+		return err
+	}
+	yamlBody, err := c.GetPolicyRevision(context.Background(), sandbox, rev)
+	if err != nil {
+		return err
+	}
+	fmt.Print(yamlBody)
+	if len(yamlBody) > 0 && yamlBody[len(yamlBody)-1] != '\n' {
+		fmt.Println()
+	}
+	return nil
+}
+
+// SandboxProviderList prints attached provider metadata (no secret values).
+func (a *App) SandboxProviderList(sandbox string) error {
+	c, err := a.gatewayClient()
+	if err != nil {
+		return err
+	}
+	list, err := c.ListSandboxProviders(context.Background(), sandbox)
+	if err != nil {
+		return err
+	}
+	if len(list) == 0 {
+		fmt.Println("sandbox providers: (none)")
+		return nil
+	}
+	for _, p := range list {
+		fmt.Printf("%s\ttype=%s\tenv=%v\n", p.Name, p.Type, p.EnvVars)
+	}
+	return nil
+}
+
+// PolicyGet prints sandbox policy YAML. view is "base" or "full" (default full).
+func (a *App) PolicyGet(sandboxName, view string) error {
+	if view == "" {
+		view = "full"
+	}
+	c, err := a.gatewayClient()
+	if err != nil {
+		return err
+	}
+	b, err := c.GetSandboxPolicy(context.Background(), sandboxName, view)
+	if err != nil {
+		return err
+	}
+	fmt.Print(string(b))
+	if len(b) > 0 && b[len(b)-1] != '\n' {
+		fmt.Println()
+	}
 	return nil
 }
 
@@ -296,24 +605,12 @@ func writeFileInPlace(path string, data []byte) error {
 	return f.Sync()
 }
 
-func currentGatewayURL() (string, error) {
-	cfg, _, err := gwconfig.Load()
-	if err != nil {
-		return "", err
-	}
-	u := gwconfig.CurrentURL(cfg)
-	if u == "" {
-		return "", fmt.Errorf("no current gateway; run: osg gateway add|select")
-	}
-	return u, nil
-}
-
-func mergeGatewayGlobal(doc policy.Document) (policy.Document, error) {
-	cfg, _, err := gwconfig.Load()
-	if err != nil || gwconfig.CurrentURL(cfg) == "" {
+func (a *App) mergeGatewayGlobal(doc policy.Document) (policy.Document, error) {
+	u, err := a.currentGatewayURL()
+	if err != nil || u == "" {
 		return doc, nil
 	}
-	b, err := gatewayclient.New(gwconfig.CurrentURL(cfg)).GetGlobalPolicy(context.Background())
+	b, err := gatewayclient.NewWithToken(u, a.gatewayTokenForURL(u)).GetGlobalPolicy(context.Background())
 	if err != nil || len(bytesTrim(b)) == 0 {
 		return doc, nil
 	}
@@ -377,6 +674,27 @@ type SandboxCreateOpts struct {
 	// Providers are profile ids or existing instance names (OpenShell --provider).
 	// On create: discover host env, ensure gateway instance, compose policy before start, attach.
 	Providers []string
+	// AutoProviders enables OpenShell-style inference from trailing argv.
+	AutoProviders bool
+	// NoAutoProviders forces ModeOff even if AutoProviders is set.
+	NoAutoProviders bool
+	// Env is non-secret create-time environment (KEY=VALUE). Credential-looking keys warn.
+	Env map[string]string
+	// NoCredentialWarnings suppresses --env credential-looking key warnings.
+	NoCredentialWarnings bool
+
+	Detach   bool
+	Editor   string // vscode | cursor
+	Forwards []int
+	Upload   string
+	CPU      float64
+	Memory   string
+	Template string
+
+	DriverConfigJSON string // --driver-config-json
+	ApprovalMode     string // manual|auto
+	NoKeep           bool   // delete sandbox after main command exits
+	ForceTTY         bool   // --tty force PTY for create-time exec
 }
 
 // SandboxCreate creates and starts a sandbox.
@@ -384,7 +702,17 @@ func (a *App) SandboxCreate(opt SandboxCreateOpts) error {
 	if a.Sandboxes == nil || a.Sandboxes.Driver == nil {
 		return fmt.Errorf("sandbox create: docker not available")
 	}
+	if opt.Template != "" {
+		tpl, err := templates.Get(opt.Template)
+		if err != nil {
+			return fmt.Errorf("sandbox create template: %w", err)
+		}
+		mergeTemplateIntoCreate(&opt, tpl)
+	}
 	ws := opt.Workspace
+	if ws == "" && a.GlobalWorkspace != "" && a.GlobalWorkspace != "default" {
+		ws = a.GlobalWorkspace
+	}
 	if ws == "" {
 		ws, _ = os.Getwd()
 	}
@@ -392,16 +720,50 @@ func (a *App) SandboxCreate(opt SandboxCreateOpts) error {
 	if name == "" {
 		name = filepath.Base(ws)
 	}
-	baseDoc, basePath, err := loadOrDenyAll(opt.Policy)
+	baseDoc, basePath, err := a.loadOrDenyAll(opt.Policy)
 	if err != nil {
 		return err
 	}
 	gwURL := opt.GatewayURL
 	if gwURL == "" {
+		// Production Docker path: gateway is required for secrets + registry unless --no-proxy
+		// and no providers (dev escape hatch).
+		needGW := !opt.NoProxy || len(opt.Providers) > 0 || opt.AutoProviders
+		if err := a.GatewayEnsure(); err != nil {
+			if needGW {
+				return fmt.Errorf("sandbox create: %w", err)
+			}
+			fmt.Fprintf(os.Stderr, "sandbox create: warn: %v\n", err)
+		}
 		if cfg, _, err := gwconfig.Load(); err == nil {
 			gwURL = gwconfig.CurrentURL(cfg)
 		}
 	}
+	if gwURL == "" && (!opt.NoProxy || len(opt.Providers) > 0) {
+		return fmt.Errorf("sandbox create: gateway required for proxy/providers (osg gateway ensure)")
+	}
+	if !opt.NoCredentialWarnings {
+		hints := map[string][]env.ProfileHint{}
+		for k := range opt.Env {
+			if hs := env.HintKey(k); len(hs) > 0 {
+				hints[k] = hs
+			}
+		}
+		env.WarnCredentialEnv(os.Stderr, opt.Env, hints, false)
+	}
+	mode := autoprovider.ModeOff
+	switch {
+	case opt.NoAutoProviders:
+		mode = autoprovider.ModeOff
+	case opt.AutoProviders:
+		mode = autoprovider.ModeOn
+	default:
+		// OpenShell: known trailing agents auto-create providers unless --no-auto-providers.
+		if len(InferProvidersFromArgv(opt.Argv)) > 0 {
+			mode = autoprovider.ModeOn
+		}
+	}
+	opt.Providers = autoprovider.Merge(opt.Providers, InferProvidersFromArgv(opt.Argv), mode)
 	attached, doc, policyPath, err := a.prepareProviders(baseDoc, basePath, opt.Providers, gwURL)
 	if err != nil {
 		return err
@@ -415,19 +777,46 @@ func (a *App) SandboxCreate(opt SandboxCreateOpts) error {
 	}
 	opt.Image = img
 
+	if opt.Labels == nil {
+		opt.Labels = map[string]string{}
+	}
+	if am := strings.ToLower(strings.TrimSpace(opt.ApprovalMode)); am != "" {
+		if am != "manual" && am != "auto" {
+			return fmt.Errorf("sandbox create: --approval-mode must be manual|auto")
+		}
+		opt.Labels["osg.approval-mode"] = am
+	}
+
 	spec := driver.Spec{
-		Name:          name,
-		Image:         opt.Image,
-		Workspace:     ws,
-		IKnow:         opt.IKnow,
-		Env:           hostEnvForPolicy(doc),
-		PolicyPath:    policyPath,
-		NoHarden:      opt.NoHarden,
-		Labels:        opt.Labels,
-		PersistVolume: !opt.NoVolume,
-		EnableSSH:     opt.SSH,
-		GPU:           opt.GPU || envTruthy("OSG_GPU"),
-		CDIDevices:    append([]string{}, opt.CDIDevices...),
+		Name:             name,
+		Image:            opt.Image,
+		Workspace:        ws,
+		IKnow:            opt.IKnow,
+		Env:              hostEnvForPolicy(doc),
+		PolicyPath:       policyPath,
+		NoHarden:         opt.NoHarden,
+		Labels:           opt.Labels,
+		PersistVolume:    !opt.NoVolume,
+		EnableSSH:        opt.SSH,
+		GPU:              opt.GPU || envTruthy("OSG_GPU"),
+		CDIDevices:       append([]string{}, opt.CDIDevices...),
+		CPU:              opt.CPU,
+		DriverConfigJSON: opt.DriverConfigJSON,
+	}
+	if opt.Memory != "" {
+		if mem, err := dockerdriver.ParseMemoryBytes(opt.Memory); err != nil {
+			return fmt.Errorf("sandbox create --memory: %w", err)
+		} else {
+			spec.MemoryBytes = mem
+		}
+	}
+	for _, p := range opt.Forwards {
+		if p > 0 {
+			spec.PublishPorts = append(spec.PublishPorts, driver.PortPublish{Host: p, Guest: p})
+		}
+	}
+	for k, v := range opt.Env {
+		spec.Env = append(spec.Env, k+"="+v)
 	}
 	if !opt.NoHostInternal {
 		spec.ExtraHosts = []string{"host.osg.internal:host-gateway"}
@@ -554,13 +943,45 @@ func (a *App) SandboxCreate(opt SandboxCreateOpts) error {
 	if !opt.NoVolume {
 		fmt.Printf("volume: osg-data-%s → %s (retained across stop/start)\n", h.Name, defaults.GuestData)
 	}
+	if opt.Upload != "" {
+		dest := "/workspace/" + filepath.Base(opt.Upload)
+		if err := mounts.ValidateUploadDest(dest); err != nil {
+			return fmt.Errorf("sandbox create --upload: %w", err)
+		}
+		if err := a.Copy(opt.Upload, h.Name+":"+dest); err != nil {
+			return err
+		}
+	}
+	for _, p := range opt.Forwards {
+		if p > 0 {
+			_ = a.ForwardStart(h.Name, fmt.Sprintf("%d", p), fmt.Sprintf("%d", p), true)
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(opt.Editor)) {
+	case "vscode", "cursor":
+		if err := a.SandboxSSHConfig(h.Name); err != nil {
+			fmt.Fprintf(os.Stderr, "editor: ssh-config: %v\n", err)
+		} else {
+			fmt.Printf("editor: open %s via Remote-SSH (Host osg-%s)\n", opt.Editor, h.Name)
+		}
+	}
 	if len(opt.Argv) > 0 {
-		return a.Exec(ExecOpts{
+		if opt.Detach {
+			fmt.Printf("sandbox create: --detach skipping exec of %v\n", opt.Argv)
+			return nil
+		}
+		tty := opt.ForceTTY || term.IsTerminal(int(os.Stdin.Fd()))
+		execErr := a.Exec(ExecOpts{
 			Name: h.Name,
 			Argv: opt.Argv,
-			TTY:  term.IsTerminal(int(os.Stdin.Fd())),
+			TTY:  tty,
 			Env:  hostEnvForPolicy(doc),
 		})
+		if opt.NoKeep {
+			_ = a.SandboxRemove(h.Name)
+			fmt.Printf("sandbox create: --no-keep removed %s\n", h.Name)
+		}
+		return execErr
 	}
 	return nil
 }
@@ -693,8 +1114,8 @@ func (a *App) LogsToOpts(ctx context.Context, opt LogsOpts, w io.Writer) error {
 		return fmt.Errorf("logs: no sandbox names")
 	}
 	// Prefer gateway SSE when available.
-	if gw, err := currentGatewayURL(); err == nil && gw != "" {
-		c := gatewayclient.New(gw)
+	if gw, err := a.currentGatewayURL(); err == nil && gw != "" {
+		c := gatewayclient.NewWithToken(gw, a.gatewayTokenForURL(gw))
 		if _, err := c.Healthz(ctx); err == nil {
 			if opt.Follow {
 				return c.FollowLogs(ctx, names, opt.All, opt.Since, opt.Source, opt.Level, w)
@@ -774,21 +1195,49 @@ func (a *App) LogsToOpts(ctx context.Context, opt LogsOpts, w io.Writer) error {
 
 // GatewayAdd registers a named gateway in config.
 func (a *App) GatewayAdd(name, url string) error {
+	return a.GatewayAddParsed(osargs.GatewayAdd{Name: name, Endpoint: url})
+}
+
+// GatewayAddParsed registers a gateway including optional OIDC metadata.
+func (a *App) GatewayAddParsed(parsed osargs.GatewayAdd) error {
+	name, url := parsed.Name, parsed.Endpoint
 	if name == "" || url == "" {
-		return fmt.Errorf("usage: osg gateway add <name> --url URL")
+		return fmt.Errorf("usage: osg gateway add <endpoint> [--name NAME] [--local] [--oidc-issuer URL]")
 	}
 	cfg, path, err := gwconfig.Load()
 	if err != nil {
 		return err
 	}
-	cfg.Gateways[name] = gwconfig.Gateway{URL: url}
-	if cfg.Current == "" {
-		cfg.Current = name
+	g := gwconfig.Gateway{
+		URL:           url,
+		OIDCIssuer:    parsed.OIDCIssuer,
+		OIDCClientID:  parsed.OIDCClientID,
+		OIDCAudience:  parsed.OIDCAudience,
+		OIDCScopes:    parsed.OIDCScopes,
+		OIDCAllowHTTP: parsed.OIDCAllowHTTP,
 	}
+	// Preserve tokens if re-adding same name with same URL.
+	if prev, ok := cfg.Gateways[name]; ok && prev.URL == url {
+		g.Token = prev.Token
+		g.RefreshToken = prev.RefreshToken
+		g.TokenExpiresAtMS = prev.TokenExpiresAtMS
+		if g.OIDCIssuer == "" {
+			g.OIDCIssuer = prev.OIDCIssuer
+		}
+		if g.OIDCClientID == "" {
+			g.OIDCClientID = prev.OIDCClientID
+		}
+	}
+	cfg.Gateways[name] = g
+	cfg.Current = name
 	if err := gwconfig.Save(cfg); err != nil {
 		return err
 	}
 	fmt.Printf("gateway add: ok name=%s url=%s config=%s\n", name, url, path)
+	if g.OIDCIssuer != "" {
+		fmt.Printf("gateway add: oidc issuer=%s client_id=%s\n", g.OIDCIssuer, g.OIDCClientID)
+		fmt.Printf("gateway add: run `osg gateway login` for Authorization Code + PKCE\n")
+	}
 	return nil
 }
 
@@ -862,12 +1311,13 @@ func (a *App) GatewayListRemote() error {
 	return nil
 }
 
-// ExecOpts for osg exec / run.
+// ExecOpts for osg sandbox exec.
 type ExecOpts struct {
-	Name string
-	Argv []string
-	TTY  bool
-	Env  []string
+	Name    string
+	Argv    []string
+	TTY     bool
+	Env     []string
+	WorkDir string
 }
 
 // Exec runs a command in a sandbox.
@@ -876,26 +1326,27 @@ func (a *App) Exec(opt ExecOpts) error {
 		return fmt.Errorf("exec: docker not available")
 	}
 	if opt.Name == "" || len(opt.Argv) == 0 {
-		return fmt.Errorf("usage: osg exec <name> -- <cmd>...")
+		return fmt.Errorf("usage: osg sandbox exec [--name] <name> [--workdir DIR] [--env K=V] -- <cmd>...")
 	}
-	guestEnv := opt.Env
-	if guestEnv == nil {
-		guestEnv = env.FromHost()
-	}
+	// Always overlay credential placeholders from effective policy so attach/refresh
+	// works without recreating the container (Docker Config.Env is immutable).
+	guestEnv := a.credentialPlaceholdersForSandbox(opt.Name)
+	guestEnv = mergeEnvEntries(guestEnv, opt.Env)
 	tty := opt.TTY
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
-	emitProc(opt.Name, "LAUNCH", strings.Join(opt.Argv, " "), 0)
+	a.emitProc(opt.Name, "LAUNCH", strings.Join(opt.Argv, " "), 0)
 	res, err := a.Sandboxes.Exec(ctx, opt.Name, driver.ExecRequest{
-		Argv: opt.Argv,
-		TTY:  tty,
-		Env:  guestEnv,
+		Argv:    opt.Argv,
+		TTY:     tty,
+		Env:     guestEnv,
+		WorkDir: opt.WorkDir,
 	})
 	code := 0
 	if res.ExitCode != 0 {
 		code = res.ExitCode
 	}
-	emitProc(opt.Name, "EXIT", strings.Join(opt.Argv, " "), code)
+	a.emitProc(opt.Name, "EXIT", strings.Join(opt.Argv, " "), code)
 	if err != nil {
 		return err
 	}
@@ -905,8 +1356,8 @@ func (a *App) Exec(opt ExecOpts) error {
 	return nil
 }
 
-func emitProc(sandbox, activity, details string, exitCode int) {
-	gw, err := currentGatewayURL()
+func (a *App) emitProc(sandbox, activity, details string, exitCode int) {
+	gw, err := a.currentGatewayURL()
 	if err != nil || gw == "" || sandbox == "" {
 		return
 	}
@@ -915,7 +1366,7 @@ func emitProc(sandbox, activity, details string, exitCode int) {
 	if activity == "EXIT" {
 		text = fmt.Sprintf("%s OCSF PROC:EXIT [INFO] ALLOWED %s [exit:%d]", ts.Format(time.RFC3339Nano), details, exitCode)
 	}
-	c := gatewayclient.New(gw)
+	c := gatewayclient.NewWithToken(gw, a.gatewayTokenForURL(gw))
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	_ = c.PostLogs(ctx, sandbox, []gatewayclient.LogLine{{
@@ -952,7 +1403,7 @@ func (a *App) Run(opt RunOpts) error {
 	if name == "" {
 		name = filepath.Base(ws)
 	}
-	doc, policyPath, err := loadOrDenyAll(opt.Policy)
+	doc, policyPath, err := a.loadOrDenyAll(opt.Policy)
 	if err != nil {
 		return err
 	}
@@ -1061,7 +1512,7 @@ func (a *App) Proxy(opt ProxyOpts) error {
 	if listen == "" {
 		listen = defaults.ProxyListenLocal()
 	}
-	doc, _, err := loadOrDenyAll(opt.Policy)
+	doc, _, err := a.loadOrDenyAll(opt.Policy)
 	if err != nil {
 		return err
 	}
@@ -1084,7 +1535,11 @@ func (a *App) Proxy(opt ProxyOpts) error {
 	if sandbox == "" {
 		sandbox = os.Getenv("OSG_SANDBOX")
 	}
-	audit := proxy.NewMultiAudit(os.Stderr, logDir, gwURL, sandbox)
+	var pusher proxy.LogPusher
+	if gwURL != "" && sandbox != "" {
+		pusher = gatewayAuditPusher{c: gatewayclient.New(gwURL)}
+	}
+	audit := proxy.NewMultiAudit(os.Stderr, logDir, sandbox, pusher)
 	defer audit.Close()
 	srv := proxy.NewServer(&eng, audit)
 
@@ -1134,8 +1589,35 @@ func refreshProxySecrets(srv *proxy.Server, gwURL, sandbox string) error {
 	for k, v := range m {
 		store[k] = v
 	}
+	// Mirror GitHub token aliases (policy/credential_keys may list both).
+	if v := store["GITHUB_TOKEN"]; v != "" {
+		if _, ok := store["GH_TOKEN"]; !ok {
+			store["GH_TOKEN"] = v
+		}
+	}
+	if v := store["GH_TOKEN"]; v != "" {
+		if _, ok := store["GITHUB_TOKEN"]; !ok {
+			store["GITHUB_TOKEN"] = v
+		}
+	}
 	srv.SetSecrets(store)
 	return nil
+}
+
+// gatewayAuditPusher adapts gatewayclient to proxy.LogPusher.
+type gatewayAuditPusher struct {
+	c *gatewayclient.Client
+}
+
+func (g gatewayAuditPusher) PostLogs(ctx context.Context, sandbox string, lines []proxy.AuditLine) error {
+	if g.c == nil || len(lines) == 0 {
+		return nil
+	}
+	out := make([]gatewayclient.LogLine, len(lines))
+	for i, l := range lines {
+		out[i] = gatewayclient.LogLine{TS: l.TS, Source: l.Source, Level: l.Level, Text: l.Text}
+	}
+	return g.c.PostLogs(ctx, sandbox, out)
 }
 
 func hostEnvForPolicy(doc policy.Document) []string {
@@ -1145,6 +1627,105 @@ func hostEnvForPolicy(doc policy.Document) []string {
 		"HOME="+defaults.GuestHome,
 		"PATH="+defaults.GuestPath,
 	)
+	return out
+}
+
+// credentialPlaceholdersForSandbox returns osg:resolve:env placeholders for the
+// sandbox effective policy credential keys (and attached provider guest keys).
+// Profiles with inject_env: false (Cursor) are skipped — Agent validates the key
+// client-side and rejects placeholders.
+func (a *App) credentialPlaceholdersForSandbox(sandbox string) []string {
+	keys := a.sandboxCredentialKeys(sandbox)
+	return env.FromHostForGuest(keys...)
+}
+
+func (a *App) sandboxCredentialKeys(sandbox string) []string {
+	var keys []string
+	seen := map[string]struct{}{}
+	omit := map[string]struct{}{} // inject_env:false — never guest-inject
+	add := func(list []string) {
+		for _, k := range list {
+			k = strings.TrimSpace(k)
+			if k == "" {
+				continue
+			}
+			if _, skip := omit[k]; skip {
+				continue
+			}
+			if _, ok := seen[k]; ok {
+				continue
+			}
+			seen[k] = struct{}{}
+			keys = append(keys, k)
+		}
+	}
+	if c, err := a.gatewayClient(); err == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if sb, err := c.GetSandbox(ctx, sandbox); err == nil {
+			for _, name := range sb.AttachedProviders {
+				rec, err := c.GetProvider(ctx, name)
+				if err != nil {
+					continue
+				}
+				prof, err := loadBuiltinProfile(rec.Type)
+				if err != nil {
+					// Unknown profile: fall back to instance env vars.
+					add(rec.EnvVars)
+					continue
+				}
+				for _, cred := range prof.Credentials {
+					if cred.InjectEnv != nil && !*cred.InjectEnv {
+						for _, k := range cred.EnvVars {
+							omit[strings.TrimSpace(k)] = struct{}{}
+						}
+					}
+				}
+				guest := prof.GuestEnvKeys()
+				if len(rec.EnvVars) > 0 {
+					// Restrict to instance keys, still honoring inject_env:false.
+					var filtered []string
+					for _, k := range rec.EnvVars {
+						if _, skip := omit[k]; skip {
+							continue
+						}
+						filtered = append(filtered, k)
+					}
+					guest = filtered
+				}
+				add(guest)
+			}
+		}
+		if b, err := c.EffectivePolicy(ctx, sandbox); err == nil {
+			if doc, err := policy.Parse(b); err == nil {
+				add(doc.CredentialEnvKeys())
+			}
+		}
+	}
+	return keys
+}
+
+func mergeEnvEntries(base, extra []string) []string {
+	keys := map[string]int{}
+	out := make([]string, 0, len(base)+len(extra))
+	add := func(entry string) {
+		key, _, ok := strings.Cut(entry, "=")
+		if !ok || key == "" {
+			return
+		}
+		if i, exists := keys[key]; exists {
+			out[i] = entry
+			return
+		}
+		keys[key] = len(out)
+		out = append(out, entry)
+	}
+	for _, e := range base {
+		add(e)
+	}
+	for _, e := range extra {
+		add(e)
+	}
 	return out
 }
 
@@ -1160,29 +1741,78 @@ func proxySecretsForPolicy(doc policy.Document) []string {
 
 // proxyGatewayEnv adds OSG_GATEWAY_URL / OSG_SANDBOX so the sidecar can resolve
 // encrypted provider secrets and push OCSF logs (OpenShell-like).
+// When an inference route is configured, also inject OSG_INFERENCE_* for inference.local.
 func proxyGatewayEnv(sandbox, gwURL string) []string {
 	var out []string
 	if gwURL == "" {
-		gwURL, _ = currentGatewayURL()
+		if cfg, _, err := gwconfig.Load(); err == nil {
+			gwURL = gwconfig.CurrentURL(cfg)
+		}
 	}
 	if gwURL == "" {
 		return out
 	}
-	// From inside Docker Desktop / Linux, host.osg.internal reaches the host gateway.
+	// From inside Docker Desktop / Linux, host.docker.internal reaches the host
+	// gateway. Also keep host.osg.internal when ExtraHosts is set on the sidecar.
 	guestGW := gwURL
 	if u := strings.TrimSpace(gwURL); strings.Contains(u, "127.0.0.1") || strings.Contains(u, "localhost") {
-		guestGW = strings.Replace(u, "127.0.0.1", "host.osg.internal", 1)
-		guestGW = strings.Replace(guestGW, "localhost", "host.osg.internal", 1)
+		guestGW = strings.Replace(u, "127.0.0.1", "host.docker.internal", 1)
+		guestGW = strings.Replace(guestGW, "localhost", "host.docker.internal", 1)
 	}
 	out = append(out, "OSG_GATEWAY_URL="+guestGW)
 	if sandbox != "" {
 		out = append(out, "OSG_SANDBOX="+sandbox)
 	}
 	out = append(out, "OSG_LOG_DIR=/var/log")
+	out = append(out, inferenceProxyEnv(gwURL)...)
 	return out
 }
 
-func loadOrDenyAll(path string) (policy.Document, string, error) {
+func inferenceProxyEnv(gwURL string) []string {
+	c := gatewayclient.New(gwURL)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	route, err := c.GetInference(ctx)
+	if err != nil || route.Provider == "" {
+		return nil
+	}
+	out := []string{
+		"OSG_INFERENCE_MODEL=" + route.Model,
+		fmt.Sprintf("OSG_INFERENCE_TIMEOUT=%d", route.TimeoutSec),
+	}
+	if up := inferenceUpstreamForType(route.Provider, c, ctx); up != "" {
+		out = append(out, "OSG_INFERENCE_UPSTREAM="+up)
+	}
+	rec, err := c.GetProvider(ctx, route.Provider)
+	if err == nil && len(rec.EnvVars) > 0 {
+		// Prefer first credential key from host env at create time (sidecar also refreshes via gateway).
+		if v, ok := os.LookupEnv(rec.EnvVars[0]); ok && v != "" {
+			out = append(out, "OSG_INFERENCE_API_KEY="+v)
+		}
+	}
+	return out
+}
+
+func inferenceUpstreamForType(providerName string, c *gatewayclient.Client, ctx context.Context) string {
+	rec, err := c.GetProvider(ctx, providerName)
+	if err != nil {
+		return ""
+	}
+	switch strings.ToLower(rec.Type) {
+	case "nvidia":
+		return "https://integrate.api.nvidia.com"
+	case "openai", "codex", "deepinfra":
+		return "https://api.openai.com"
+	case "anthropic", "claude", "claude-code":
+		return "https://api.anthropic.com"
+	case "ollama":
+		return "http://host.osg.internal:11434"
+	default:
+		return "https://api.openai.com"
+	}
+}
+
+func (a *App) loadOrDenyAll(path string) (policy.Document, string, error) {
 	if path != "" {
 		abs, err := filepath.Abs(path)
 		if err != nil {
@@ -1192,7 +1822,7 @@ func loadOrDenyAll(path string) (policy.Document, string, error) {
 		if err != nil {
 			return policy.Document{}, "", err
 		}
-		doc, err = mergeGatewayGlobal(doc)
+		doc, err = a.mergeGatewayGlobal(doc)
 		if err != nil {
 			return policy.Document{}, "", err
 		}

@@ -44,5 +44,5 @@ osg sandbox create --name cursor \
   -- agent
 ```
 
-Interactive TUI needs a real host TTY (`osg connect` / `osg exec` without `--no-tty`).  
+Interactive TUI needs a real host TTY (`osg sandbox connect` / `osg sandbox exec` without `--no-tty`).  
 Workspace trust prompt: press `a` or Enter after the TTY fix; for headless use `agent -p --trust "…"`.

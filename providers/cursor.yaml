@@ -1,19 +1,14 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 zorneth
 # SPDX-License-Identifier: MIT
 
-# Cursor Agent credentials + API hosts (OpenShell-style agent provider).
-# OpenShell's builtin cursor profile is network-only (editor bootstrap);
-# agent API keys for Claude Code / Codex go through providers — we do the
-# same for CURSOR_API_KEY so secrets are endpoint-bound, not policy env_allow.
-#
-# inject_env: false — Cursor Agent CLI validates CURSOR_API_KEY client-side and
-# rejects osg:resolve:env placeholders ("invalid API key"). Prefer `agent login`
-# (OAuth → auth.json). The secret still lives in the gateway store / sidecar for
-# rewrite if a request carries the placeholder; it is not injected into guest env.
+# Cursor Agent — OpenShell-style network-only profile.
+# L4 CONNECT tunnel only (no tls:terminate): Cursor Agent speaks HTTP/2 ALPN;
+# MITM http/1.1 would fail with "tlsv1 alert no application protocol".
+# inject_env: false — use `agent login` (OAuth); do not put placeholders in guest env.
 
 id: cursor
 display_name: Cursor Agent
-description: Cursor Agent CLI API key and *.cursor.sh / *.cursor.com egress
+description: Cursor Agent CLI egress (*.cursor.sh / *.cursor.com); OAuth preferred
 category: agent
 binaries:
   - /usr/bin/agent
@@ -27,47 +22,27 @@ binaries:
 credentials:
   - name: api_key
     env_vars: [CURSOR_API_KEY]
-    required: true
+    required: false
     auth_style: bearer
     header_name: authorization
     inject_env: false
 endpoints:
+  # L4 tunnel — end-to-end TLS so HTTP/2 ALPN works with api2.cursor.sh
   - id: api2
     host: api2.cursor.sh
     port: 443
-    protocol: rest
-    tls: terminate
-    access: read-write
-    enforcement: enforce
   - id: api
     host: api.cursor.sh
     port: 443
-    protocol: rest
-    tls: terminate
-    access: read-write
-    enforcement: enforce
   - id: cursor-sh
     host: "**.cursor.sh"
     port: 443
-    protocol: rest
-    tls: terminate
-    access: read-write
-    enforcement: enforce
   - id: cursor-com
     host: "**.cursor.com"
     port: 443
-    protocol: rest
-    tls: terminate
-    access: read-write
-    enforcement: enforce
   - id: cursor-com-apex
     host: cursor.com
     port: 443
-    protocol: rest
-    tls: terminate
-    access: read-write
-    enforcement: enforce
-  # Bootstrap / updates (OpenShell cursor profile parity; no extra secrets)
   - id: blob
     host: cursor.blob.core.windows.net
     port: 443

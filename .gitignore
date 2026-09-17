@@ -8,3 +8,5 @@
 /osg-darwin-*
 /osg-windows-*
 .DS_Store
+/osg-gateway-*
+/osg-cli/

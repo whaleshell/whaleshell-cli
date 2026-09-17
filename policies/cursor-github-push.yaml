@@ -1,7 +1,12 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 lkmavi
 # SPDX-License-Identifier: MIT
 #
-# Cursor-oriented sandbox policy (C1 agent-in-sandbox / C2 host IDE + workdir).
+# Cursor Agent + GitHub push/create-repo base policy.
+# Replace YOUR_ORG with your GitHub org/user (sed -i '' 's/YOUR_ORG/zorneth/g' …).
+#
+#   osg sandbox create --name cursor --from cursor \
+#     --policy osg-cli/policies/cursor-github-push.yaml \
+#     --provider cursor --provider gh
 
 version: 1
 filesystem_policy:
@@ -155,6 +160,104 @@ network_policies:
       ports:
       - 80
       - 443
+  github-git-org:
+    name: github-git-org
+    endpoints:
+    - host: github.com
+      port: 443
+      protocol: rest
+      tls: terminate
+      enforcement: enforce
+      credential_keys:
+      - GITHUB_TOKEN
+      - GH_TOKEN
+      rules:
+      - allow:
+          method: GET
+          path: /YOUR_ORG/**
+      - allow:
+          method: HEAD
+          path: /YOUR_ORG/**
+      - allow:
+          method: OPTIONS
+          path: /YOUR_ORG/**
+      - allow:
+          method: POST
+          path: /YOUR_ORG/**/git-upload-pack
+      - allow:
+          method: POST
+          path: /YOUR_ORG/**/git-receive-pack
+    binaries:
+    - path: /usr/bin/git
+    - path: /usr/local/bin/git
+  github-api-org:
+    name: github-api-org
+    endpoints:
+    - host: api.github.com
+      port: 443
+      protocol: rest
+      tls: terminate
+      enforcement: enforce
+      credential_keys:
+      - GITHUB_TOKEN
+      - GH_TOKEN
+      rules:
+      - allow:
+          method: GET
+          path: /repos/YOUR_ORG/**
+      - allow:
+          method: HEAD
+          path: /repos/YOUR_ORG/**
+      - allow:
+          method: POST
+          path: /repos/YOUR_ORG/**
+      - allow:
+          method: PUT
+          path: /repos/YOUR_ORG/**
+      - allow:
+          method: PATCH
+          path: /repos/YOUR_ORG/**
+      - allow:
+          method: POST
+          path: /orgs/YOUR_ORG/repos
+      - allow:
+          method: GET
+          path: /orgs/YOUR_ORG
+      - allow:
+          method: GET
+          path: /orgs/YOUR_ORG/**
+      - allow:
+          method: POST
+          path: /user/repos
+      - allow:
+          method: GET
+          path: /user
+      - allow:
+          method: GET
+          path: /user/**
+    binaries:
+    - path: /usr/bin/gh
+    - path: /usr/local/bin/gh
+    - path: /usr/bin/curl
+    - path: /usr/local/bin/curl
+    - path: /usr/bin/git
+    - path: /usr/local/bin/git
+  github-graphql-rw:
+    name: github-graphql-rw
+    endpoints:
+    - host: api.github.com
+      port: 443
+      path: /graphql
+      protocol: graphql
+      tls: terminate
+      access: read-write
+      enforcement: enforce
+      credential_keys:
+      - GITHUB_TOKEN
+      - GH_TOKEN
+    binaries:
+    - path: /usr/bin/gh
+    - path: /usr/local/bin/gh
 inference:
   providers:
   - anthropic
@@ -167,6 +270,8 @@ display:
   browser: chromium
 credentials:
   env_allow:
+  - GITHUB_TOKEN
+  - GH_TOKEN
   - TERM
   - LANG
   - COLORTERM

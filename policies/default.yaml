@@ -4,45 +4,39 @@
 # Default osg sandbox policy.
 
 version: 1
-
-filesystem:
+filesystem_policy:
   include_workdir: true
-  read:
-    - /usr
-    - /lib
-    - /proc
-    - /dev/urandom
-    - /app
-    - /etc
-    - /var/log
-  write:
-    - /tmp
-    - /dev/null
-    - /osg/data
-  mode: best_effort
-
-network:
-  default: deny
-  allow: []
-
+  read_only:
+  - /usr
+  - /lib
+  - /proc
+  - /dev/urandom
+  - /app
+  - /etc
+  - /var/log
+  read_write:
+  - /tmp
+  - /dev/null
+  - /osg/data
+landlock:
+  compatibility: best_effort
+network_policies: {}
 inference:
   providers:
-    - anthropic
-    - openai
-
+  - anthropic
+  - openai
 display:
   mode: none
   publish: 127.0.0.1
   port: 6080
   auth: password
   browser: chromium
-
 credentials:
   env_allow:
-    - TERM
-    - LANG
-    - COLORTERM
-    - ANTHROPIC_API_KEY
-    - OPENAI_API_KEY
-    - DISPLAY
+  - TERM
+  - LANG
+  - COLORTERM
+  - ANTHROPIC_API_KEY
+  - OPENAI_API_KEY
+  - DISPLAY
   write_to_disk: false

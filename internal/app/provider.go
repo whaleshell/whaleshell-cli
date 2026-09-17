@@ -2,29 +2,22 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/zorneth/osg-cli/internal/gwconfig"
+	"github.com/zorneth/osg-cli/internal/providerflags"
 	"github.com/zorneth/osg-core/engine"
+	"github.com/zorneth/osg-core/env"
 	"github.com/zorneth/osg-core/policy"
-	"github.com/zorneth/osg-core/provider"
-	"github.com/zorneth/osg-runtime/gatewayclient"
+	"github.com/zorneth/osg-providers/provider"
+	"github.com/zorneth/osg-sdk/gatewayclient"
 	"gopkg.in/yaml.v3"
 )
-
-func (a *App) gatewayClient() (*gatewayclient.Client, error) {
-	u, err := currentGatewayURL()
-	if err != nil {
-		return nil, err
-	}
-	if u == "" {
-		return nil, fmt.Errorf("no gateway selected (osg gateway add|select)")
-	}
-	return gatewayclient.New(u), nil
-}
 
 // ProviderProfileList lists builtin + custom profiles on the current gateway.
 func (a *App) ProviderProfileList() error {
@@ -65,54 +58,99 @@ func (a *App) ProviderProfileImport(path string) error {
 
 // ProviderProfileShow prints a local builtin/custom file or validates path.
 func (a *App) ProviderProfileShow(idOrPath string) error {
+	return a.ProviderProfileShowFmt(idOrPath, "yaml")
+}
+
+// ProviderProfileShowFmt prints a profile as yaml or json wrapper.
+func (a *App) ProviderProfileShowFmt(idOrPath, format string) error {
+	var b []byte
+	var err error
 	if strings.Contains(idOrPath, "/") || strings.HasSuffix(idOrPath, ".yaml") || strings.HasSuffix(idOrPath, ".yml") {
-		b, err := os.ReadFile(idOrPath)
-		if err != nil {
-			return err
+		b, err = os.ReadFile(idOrPath)
+	} else {
+		dir := provider.FindBuiltinDir()
+		if dir == "" {
+			return fmt.Errorf("providers dir not found")
 		}
-		fmt.Print(string(b))
-		return nil
+		b, err = os.ReadFile(filepath.Join(dir, idOrPath+".yaml"))
 	}
-	dir := provider.FindBuiltinDir()
-	if dir == "" {
-		return fmt.Errorf("providers dir not found")
-	}
-	path := filepath.Join(dir, idOrPath+".yaml")
-	b, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	fmt.Print(string(b))
-	return nil
+	switch strings.ToLower(format) {
+	case "json":
+		var doc any
+		if err := yaml.Unmarshal(b, &doc); err != nil {
+			return err
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(doc)
+	default:
+		fmt.Print(string(b))
+		return nil
+	}
 }
 
 // ProviderCreate registers an instance and stores credential values on the gateway
 // (OpenShell-like). Values are never returned by list/get.
-// credentials maps env KEY → value (from --credential / --from-existing).
-func (a *App) ProviderCreate(name, profileType string, envVars []string, fromExisting bool, credentials map[string]string) error {
+func (a *App) ProviderCreate(args providerflags.CreateArgs) error {
+	credentials := args.Credentials
 	if credentials == nil {
 		credentials = map[string]string{}
 	}
-	prof, err := loadBuiltinProfile(profileType)
+	prof, err := loadBuiltinProfile(args.Profile)
 	if err != nil {
 		return err
 	}
-	if fromExisting || len(envVars) == 0 {
+	envVars := args.EnvVars
+	if args.FromExisting || len(envVars) == 0 {
 		discovered, err := prof.DiscoverEnvVars()
 		if err != nil {
 			return err
 		}
-		if fromExisting || len(envVars) == 0 {
+		if args.FromExisting || len(envVars) == 0 {
 			envVars = discovered
 		}
 	}
-	// Copy values from host env for discovered / listed keys (OpenShell --from-existing).
 	for _, k := range envVars {
 		if _, ok := credentials[k]; ok {
 			continue
 		}
 		if v, ok := os.LookupEnv(k); ok && strings.TrimSpace(v) != "" {
 			credentials[k] = v
+		}
+	}
+	if args.FromOIDCToken {
+		cfg, _, err := gwconfig.Load()
+		if err != nil {
+			return err
+		}
+		tok := ""
+		if cfg.Current != "" {
+			tok = strings.TrimSpace(cfg.Gateways[cfg.Current].Token)
+		}
+		if tok == "" {
+			return fmt.Errorf("provider create --from-oidc-token: no gateway token (run: osg gateway login)")
+		}
+		key := "OSG_GATEWAY_TOKEN"
+		if len(envVars) > 0 {
+			key = envVars[0]
+		}
+		credentials[key] = tok
+		if !containsString(envVars, key) {
+			envVars = append(envVars, key)
+		}
+	}
+	if args.FromGCloudADC {
+		adc, err := readGCloudADC()
+		if err != nil {
+			return fmt.Errorf("provider create --from-gcloud-adc: %w", err)
+		}
+		key := "GOOGLE_APPLICATION_CREDENTIALS_JSON"
+		credentials[key] = adc
+		if !containsString(envVars, key) {
+			envVars = append(envVars, key)
 		}
 	}
 	if len(envVars) == 0 && len(credentials) > 0 {
@@ -125,13 +163,28 @@ func (a *App) ProviderCreate(name, profileType string, envVars []string, fromExi
 		return err
 	}
 	rec := gatewayclient.ProviderRecord{
-		Name: name, Type: profileType, EnvVars: envVars, Credentials: credentials,
+		Name:                  args.Name,
+		Type:                  args.Profile,
+		EnvVars:               envVars,
+		Credentials:           credentials,
+		RuntimeCredentials:    args.RuntimeCredentials,
+		CredentialExpiresAtMS: args.CredentialExpiresAt,
+		Config:                args.Config,
 	}
 	if err := c.PutProvider(context.Background(), rec); err != nil {
 		return err
 	}
-	fmt.Printf("provider %s type=%s env=%v (values stored encrypted on gateway; never printed)\n", name, profileType, envVars)
+	fmt.Printf("provider %s type=%s env=%v (values stored encrypted on gateway; never printed)\n", args.Name, args.Profile, envVars)
 	return nil
+}
+
+func containsString(list []string, s string) bool {
+	for _, x := range list {
+		if x == s {
+			return true
+		}
+	}
+	return false
 }
 
 // ProviderUpdate refreshes credential values for an existing instance.
@@ -206,7 +259,7 @@ func (a *App) prepareProviders(base policy.Document, basePath string, names []st
 		attached = append(attached, instName)
 		fmt.Printf("provider: %s (type=%s env=%v)\n", instName, prof.ID, envKeys)
 	}
-	doc = provider.Compose(base, layers, false)
+	doc = provider.EffectivePolicy(base, layers, false)
 	if err := doc.Validate(); err != nil {
 		return nil, base, basePath, fmt.Errorf("provider compose: %w", err)
 	}
@@ -230,51 +283,80 @@ func (a *App) prepareProviders(base policy.Document, basePath string, names []st
 }
 
 func (a *App) resolveProviderForCreate(name, gwURL string) (provider.Profile, []string, string, error) {
-	// Prefer existing gateway instance with this name.
+	// Prefer existing gateway instance with this name (OpenShell: --provider <instance>).
 	if gwURL != "" {
 		c := gatewayclient.New(gwURL)
-		if list, err := c.ListProviders(context.Background()); err == nil {
-			for _, rec := range list {
-				if rec.Name != name {
-					continue
-				}
-				prof, err := loadBuiltinProfile(rec.Type)
+		list, err := c.ListProviders(context.Background())
+		if err != nil {
+			return provider.Profile{}, nil, "", fmt.Errorf("provider %q: gateway %s: %w (is osg-gateway running?)", name, gwURL, err)
+		}
+		for _, rec := range list {
+			if rec.Name != name {
+				continue
+			}
+			prof, err := loadBuiltinProfile(rec.Type)
+			if err != nil {
+				return provider.Profile{}, nil, "", fmt.Errorf("provider %q: profile type %q: %w", name, rec.Type, err)
+			}
+			keys := rec.EnvVars
+			if len(keys) == 0 {
+				keys, err = prof.DiscoverEnvVars()
 				if err != nil {
-					return provider.Profile{}, nil, "", err
-				}
-				keys := rec.EnvVars
-				if len(keys) == 0 {
-					keys, err = prof.DiscoverEnvVars()
-					if err != nil {
+					if allCredentialsOptional(prof) {
+						keys = prof.EnvKeys()
+					} else {
 						return provider.Profile{}, nil, "", err
 					}
 				}
-				return prof, keys, rec.Name, nil
 			}
+			return prof, keys, rec.Name, nil
 		}
 	}
-	// Treat name as profile id: discover env and auto-create instance.
+	// Treat name as profile id: discover env and auto-create instance (e.g. --provider github).
 	prof, err := loadBuiltinProfile(name)
 	if err != nil {
-		return provider.Profile{}, nil, "", err
+		hint := ""
+		if gwURL != "" {
+			hint = fmt.Sprintf(" (no gateway instance %q; create with: osg provider create --name %s --type <profile> — or use --provider <profile-id>)", name, name)
+		}
+		return provider.Profile{}, nil, "", fmt.Errorf("provider %q: not a gateway instance or builtin profile%s: %w", name, hint, err)
 	}
 	keys, err := prof.DiscoverEnvVars()
 	if err != nil {
-		return provider.Profile{}, nil, "", err
+		// Network-only / inject_env:false profiles (Cursor): still attach endpoints without host secrets.
+		if allCredentialsOptional(prof) {
+			keys = prof.EnvKeys()
+		} else {
+			return provider.Profile{}, nil, "", err
+		}
 	}
 	if gwURL != "" {
 		c := gatewayclient.New(gwURL)
 		creds := map[string]string{}
 		for _, k := range keys {
-			if v, ok := os.LookupEnv(k); ok && strings.TrimSpace(v) != "" {
+			if v, ok := os.LookupEnv(k); ok && strings.TrimSpace(v) != "" && !env.IsPlaceholder(v) {
 				creds[k] = v
 			}
 		}
-		_ = c.PutProvider(context.Background(), gatewayclient.ProviderRecord{
+		if err := c.PutProvider(context.Background(), gatewayclient.ProviderRecord{
 			Name: name, Type: prof.ID, EnvVars: keys, Credentials: creds,
-		})
+		}); err != nil {
+			return provider.Profile{}, nil, "", fmt.Errorf("provider %q: register on gateway: %w", name, err)
+		}
 	}
 	return prof, keys, name, nil
+}
+
+func allCredentialsOptional(p provider.Profile) bool {
+	if len(p.Credentials) == 0 {
+		return true
+	}
+	for _, c := range p.Credentials {
+		if c.Required {
+			return false
+		}
+	}
+	return true
 }
 
 func loadBuiltinProfile(idOrPath string) (provider.Profile, error) {
@@ -340,7 +422,7 @@ func (a *App) ProviderDetach(sandbox, providerName string) error {
 	return nil
 }
 
-// applyEffectivePolicy fetches gateway composed YAML and writes it to the sandbox policy bind.
+// applyEffectivePolicy fetches gateway effective policy YAML and writes it to the sandbox policy bind.
 func (a *App) applyEffectivePolicy(sandbox string) error {
 	if a.Docker == nil {
 		return fmt.Errorf("docker not available")
@@ -357,7 +439,7 @@ func (a *App) applyEffectivePolicy(sandbox string) error {
 	if err != nil {
 		return err
 	}
-	doc, err = mergeGatewayGlobal(doc)
+	doc, err = a.mergeGatewayGlobal(doc)
 	if err != nil {
 		return err
 	}
@@ -394,4 +476,21 @@ func (a *App) ProviderEffective(sandbox string) error {
 	}
 	fmt.Print(string(b))
 	return nil
+}
+
+func readGCloudADC() (string, error) {
+	candidates := []string{}
+	if p := os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"); p != "" {
+		candidates = append(candidates, p)
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		candidates = append(candidates, filepath.Join(home, ".config", "gcloud", "application_default_credentials.json"))
+	}
+	for _, p := range candidates {
+		b, err := os.ReadFile(p)
+		if err == nil && len(bytesTrim(b)) > 0 {
+			return string(b), nil
+		}
+	}
+	return "", fmt.Errorf("ADC file not found (set GOOGLE_APPLICATION_CREDENTIALS or run gcloud auth application-default login)")
 }
