@@ -82,6 +82,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.27"
+          cache: true
       - name: Check gofmt
         run: |
           set -euo pipefail
@@ -158,6 +159,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.27"
+          cache: true
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
         with:
@@ -234,6 +236,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.27"
+          cache: true
       - name: Download modules
         run: go mod download
       - name: Build
@@ -308,6 +311,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.27"
+          cache: true
       - name: Download modules
         run: go mod download
       - name: Vet
