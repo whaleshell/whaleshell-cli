@@ -109,7 +109,5 @@ func mergeTemplateIntoCreate(opt *SandboxCreateOpts, tpl templates.Template) {
 			}
 		}
 	}
-	for _, p := range tpl.Forwards {
-		opt.Forwards = append(opt.Forwards, p)
-	}
+	opt.Forwards = append(opt.Forwards, tpl.Forwards...)
 }

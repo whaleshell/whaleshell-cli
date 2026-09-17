@@ -1,0 +1,65 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 the osg authors
+# SPDX-License-Identifier: MIT
+name: images-agents
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - "docker/agents/**"
+      - ".github/workflows/images-agents.yml"
+  pull_request:
+    paths:
+      - "docker/agents/**"
+      - ".github/workflows/images-agents.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/zorneth/osg/sandboxes
+  BASE_IMAGE: ghcr.io/zorneth/osg/sandboxes/base:latest
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        agent: [cursor, claude, codex]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Login GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pull base
+        run: docker pull "${{ env.BASE_IMAGE }}"
+      - name: Meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_PREFIX }}/${{ matrix.agent }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=main,enable={{is_default_branch}}
+            type=sha
+            type=semver,pattern={{version}}
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: docker/agents/${{ matrix.agent }}
+          file: docker/agents/${{ matrix.agent }}/Dockerfile
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BASE_IMAGE=${{ env.BASE_IMAGE }}

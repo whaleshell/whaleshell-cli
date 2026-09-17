@@ -826,48 +826,8 @@ func (a *App) RuleList() error {
 	return a.RuleListFilter("", "")
 }
 
-func (a *App) RuleListFilter(sandbox, status string) error {
-	dir, err := localParityDir()
-	if err != nil {
-		return err
-	}
-	m, err := readJSONMap(filepath.Join(dir, "rules.json"))
-	if err != nil {
-		return err
-	}
-	filtered := map[string]any{}
-	for id, raw := range m {
-		row, _ := raw.(map[string]any)
-		if row == nil {
-			continue
-		}
-		if sandbox != "" {
-			if sb, _ := row["sandbox"].(string); sb != "" && sb != sandbox {
-				continue
-			}
-		}
-		if status != "" {
-			if st, _ := row["state"].(string); st != status {
-				continue
-			}
-		}
-		filtered[id] = row
-	}
-	b, _ := json.MarshalIndent(filtered, "", "  ")
-	fmt.Println(string(b))
-	return nil
-}
-
-func (a *App) RuleApprove(id string) error {
-	return a.ruleSet(id, "approved", "")
-}
-
 func (a *App) RuleReject(id string) error {
 	return a.RuleRejectReason(id, "")
-}
-
-func (a *App) RuleRejectReason(id, reason string) error {
-	return a.ruleSet(id, "rejected", reason)
 }
 
 func (a *App) ruleSet(id, state, reason string) error {
@@ -885,6 +845,7 @@ func (a *App) ruleSet(id, state, reason string) error {
 		raw = map[string]any{"id": id}
 	}
 	raw["state"] = state
+	raw["status"] = state
 	raw["updated_at"] = time.Now().UTC().Format(time.RFC3339)
 	if reason != "" {
 		raw["reason"] = reason

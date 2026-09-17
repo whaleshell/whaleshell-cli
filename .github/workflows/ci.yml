@@ -1,0 +1,323 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 the osg authors
+# SPDX-License-Identifier: MIT
+#
+# gogpu-style CI: format, lint, cross-platform build + test
+name: CI
+
+env:
+  CGO_ENABLED: "0"
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  formatting:
+    name: Formatting
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: osg-cli
+    steps:
+
+      - name: Checkout osg-cli
+        uses: actions/checkout@v4
+        with:
+          path: osg-cli
+
+      - name: Checkout osg-core
+        uses: actions/checkout@v4
+        with:
+          repository: zorneth/osg-core
+          path: osg-core
+          ref: main
+
+      - name: Checkout osg-display
+        uses: actions/checkout@v4
+        with:
+          repository: zorneth/osg-display
+          path: osg-display
+          ref: main
+
+      - name: Checkout osg-driver
+        uses: actions/checkout@v4
+        with:
+          repository: zorneth/osg-driver
+          path: osg-driver
+          ref: main
+
+      - name: Checkout osg-providers
+        uses: actions/checkout@v4
+        with:
+          repository: zorneth/osg-providers
+          path: osg-providers
+          ref: main
+
+      - name: Checkout osg-proxy
+        uses: actions/checkout@v4
+        with:
+          repository: zorneth/osg-proxy
+          path: osg-proxy
+          ref: main
+
+      - name: Checkout osg-runtime
+        uses: actions/checkout@v4
+        with:
+          repository: zorneth/osg-runtime
+          path: osg-runtime
+          ref: main
+
+      - name: Checkout osg-sdk
+        uses: actions/checkout@v4
+        with:
+          repository: zorneth/osg-sdk
+          path: osg-sdk
+          ref: main
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+      - name: Check gofmt
+        run: |
+          set -euo pipefail
+          bad="$(gofmt -l .)"
+          if [[ -n "$bad" ]]; then
+            echo "ERROR: not formatted:"
+            echo "$bad"
+            exit 1
+          fi
+          echo "gofmt: ok"
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: osg-cli
+    steps:
+
+      - name: Checkout osg-cli
+        uses: actions/checkout@v4
+        with:
+          path: osg-cli
+
+      - name: Checkout osg-core
+        uses: actions/checkout@v4
+        with:
+          repository: zorneth/osg-core
+          path: osg-core
+          ref: main
+
+      - name: Checkout osg-display
+        uses: actions/checkout@v4
+        with:
+          repository: zorneth/osg-display
+          path: osg-display
+          ref: main
+
+      - name: Checkout osg-driver
+        uses: actions/checkout@v4
+        with:
+          repository: zorneth/osg-driver
+          path: osg-driver
+          ref: main
+
+      - name: Checkout osg-providers
+        uses: actions/checkout@v4
+        with:
+          repository: zorneth/osg-providers
+          path: osg-providers
+          ref: main
+
+      - name: Checkout osg-proxy
+        uses: actions/checkout@v4
+        with:
+          repository: zorneth/osg-proxy
+          path: osg-proxy
+          ref: main
+
+      - name: Checkout osg-runtime
+        uses: actions/checkout@v4
+        with:
+          repository: zorneth/osg-runtime
+          path: osg-runtime
+          ref: main
+
+      - name: Checkout osg-sdk
+        uses: actions/checkout@v4
+        with:
+          repository: zorneth/osg-sdk
+          path: osg-sdk
+          ref: main
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: latest
+          working-directory: osg-cli
+          args: --timeout=5m
+
+  build:
+    name: Build - ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        working-directory: osg-cli
+    steps:
+
+      - name: Checkout osg-cli
+        uses: actions/checkout@v4
+        with:
+          path: osg-cli
+
+      - name: Checkout osg-core
+        uses: actions/checkout@v4
+        with:
+          repository: zorneth/osg-core
+          path: osg-core
+          ref: main
+
+      - name: Checkout osg-display
+        uses: actions/checkout@v4
+        with:
+          repository: zorneth/osg-display
+          path: osg-display
+          ref: main
+
+      - name: Checkout osg-driver
+        uses: actions/checkout@v4
+        with:
+          repository: zorneth/osg-driver
+          path: osg-driver
+          ref: main
+
+      - name: Checkout osg-providers
+        uses: actions/checkout@v4
+        with:
+          repository: zorneth/osg-providers
+          path: osg-providers
+          ref: main
+
+      - name: Checkout osg-proxy
+        uses: actions/checkout@v4
+        with:
+          repository: zorneth/osg-proxy
+          path: osg-proxy
+          ref: main
+
+      - name: Checkout osg-runtime
+        uses: actions/checkout@v4
+        with:
+          repository: zorneth/osg-runtime
+          path: osg-runtime
+          ref: main
+
+      - name: Checkout osg-sdk
+        uses: actions/checkout@v4
+        with:
+          repository: zorneth/osg-sdk
+          path: osg-sdk
+          ref: main
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+      - name: Download modules
+        run: go mod download
+      - name: Build
+        run: go build ./...
+
+  test:
+    name: Test - ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        working-directory: osg-cli
+    steps:
+
+      - name: Checkout osg-cli
+        uses: actions/checkout@v4
+        with:
+          path: osg-cli
+
+      - name: Checkout osg-core
+        uses: actions/checkout@v4
+        with:
+          repository: zorneth/osg-core
+          path: osg-core
+          ref: main
+
+      - name: Checkout osg-display
+        uses: actions/checkout@v4
+        with:
+          repository: zorneth/osg-display
+          path: osg-display
+          ref: main
+
+      - name: Checkout osg-driver
+        uses: actions/checkout@v4
+        with:
+          repository: zorneth/osg-driver
+          path: osg-driver
+          ref: main
+
+      - name: Checkout osg-providers
+        uses: actions/checkout@v4
+        with:
+          repository: zorneth/osg-providers
+          path: osg-providers
+          ref: main
+
+      - name: Checkout osg-proxy
+        uses: actions/checkout@v4
+        with:
+          repository: zorneth/osg-proxy
+          path: osg-proxy
+          ref: main
+
+      - name: Checkout osg-runtime
+        uses: actions/checkout@v4
+        with:
+          repository: zorneth/osg-runtime
+          path: osg-runtime
+          ref: main
+
+      - name: Checkout osg-sdk
+        uses: actions/checkout@v4
+        with:
+          repository: zorneth/osg-sdk
+          path: osg-sdk
+          ref: main
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+      - name: Download modules
+        run: go mod download
+      - name: Vet
+        if: matrix.os == 'ubuntu-latest'
+        run: go vet ./...
+      - name: Test (race)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: go test -race -count=1 ./...
+      - name: Test
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: go test -count=1 ./...

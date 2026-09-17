@@ -497,10 +497,10 @@ func ParseSandboxExec(args []string) (SandboxExec, error) {
 		}
 	}
 	if out.Name == "" {
-		return SandboxExec{}, fmt.Errorf("usage: osg sandbox exec [--name] <name> [--workdir DIR] [--env K=V] -- <cmd>...")
+		return SandboxExec{}, fmt.Errorf("usage: osg sandbox exec [--name] <name> [--workdir DIR] [--env K=V] -- CMD")
 	}
 	if len(out.Argv) == 0 {
-		return SandboxExec{}, fmt.Errorf("usage: osg sandbox exec <name> -- <cmd>...")
+		return SandboxExec{}, fmt.Errorf("usage: osg sandbox exec <name> -- CMD")
 	}
 	return out, nil
 }

@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
 )
 
 var forwardProxies sync.Map // id -> *forwardProxy

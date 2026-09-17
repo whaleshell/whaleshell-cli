@@ -15,11 +15,13 @@ filesystem_policy:
   - /etc
   - /var/log
   - /tmp
+  - /AGENTS.md
   read_write:
   - /tmp
   - /dev/null
   - /workspace
   - /osg/data
+  - /sandbox
 landlock:
   compatibility: best_effort
 network_policies:

@@ -123,17 +123,30 @@ func ResolveImage(from, explicit string) (string, error) {
 		return img, nil
 	}
 	builtins := map[string]string{
-		"ubuntu":           "ubuntu:24.04",
-		"debian":           defaults.ImageDebian,
-		"osg/cli":          defaults.ImageLocal,
-		"osg/gui":          defaults.ImageGUI,
-		"cursor":           defaults.ImageCursor,
-		"claude":           defaults.ImageClaude,
-		"codex":            defaults.ImageCodex,
-		"base":             "ghcr.io/nvidia/openshell-community/sandboxes/base:latest",
-		"ollama":           "ghcr.io/nvidia/openshell-community/sandboxes/ollama:latest",
-		"community/ollama": "ghcr.io/nvidia/openshell-community/sandboxes/ollama:latest",
+		"ubuntu": "ubuntu:24.04",
+		"debian": defaults.ImageDebian,
+		// osg catalog shorts (local). GHCR paths when OSG_USE_GHCR=1.
+		"base":    defaults.ImageLocal,
+		"osg/cli": defaults.ImageLocal,
+		"osg/gui": defaults.ImageGUI,
+		"osg/gpu": defaults.ImageGPU,
+		"cursor":  defaults.ImageCursor,
+		"claude":  defaults.ImageClaude,
+		"codex":   defaults.ImageCodex,
+		// Opt-in NVIDIA OpenShell community interop.
 		"community/base":   "ghcr.io/nvidia/openshell-community/sandboxes/base:latest",
+		"community/ollama": "ghcr.io/nvidia/openshell-community/sandboxes/ollama:latest",
+		"ollama":           "ghcr.io/nvidia/openshell-community/sandboxes/ollama:latest",
+	}
+	// After images:pull / CI publish, set images.* in config or OSG_USE_GHCR=1 for GHCR builtins.
+	if os.Getenv("OSG_USE_GHCR") == "1" {
+		builtins["base"] = defaults.ImageBaseRef
+		builtins["osg/cli"] = defaults.ImageBaseRef
+		builtins["osg/gui"] = defaults.ImageGUIRef
+		builtins["osg/gpu"] = defaults.ImageGPURef
+		builtins["cursor"] = defaults.ImageCursorRef
+		builtins["claude"] = defaults.ImageClaudeRef
+		builtins["codex"] = defaults.ImageCodexRef
 	}
 	if img, ok := builtins[from]; ok {
 		return img, nil

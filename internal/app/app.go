@@ -24,7 +24,6 @@ import (
 	"github.com/zorneth/osg-core/policy"
 	"github.com/zorneth/osg-display"
 	"github.com/zorneth/osg-driver/driver"
-	"github.com/zorneth/osg-driver/driver/docker"
 	dockerdriver "github.com/zorneth/osg-driver/driver/docker"
 	"github.com/zorneth/osg-driver/driver/kubernetes"
 	"github.com/zorneth/osg-driver/driver/podman"
@@ -44,7 +43,7 @@ import (
 type App struct {
 	Sandboxes  *sandbox.Manager
 	Display    display.Stack
-	Docker     *docker.Driver // Engine API client (Docker or Podman)
+	Docker     *dockerdriver.Driver // Engine API client (Docker or Podman)
 	DriverName string         // "docker" | "podman" | "vm" | "kubernetes"
 
 	// OpenShell global session (ApplyGlobal).
@@ -65,13 +64,13 @@ func New() *App {
 		a.Sandboxes = &sandbox.Manager{Driver: kubernetes.New()}
 		return a
 	}
-	var d *docker.Driver
+	var d *dockerdriver.Driver
 	var err error
 	switch a.DriverName {
 	case "podman":
 		d, err = podman.New()
 	default:
-		d, err = docker.New()
+		d, err = dockerdriver.New()
 		a.DriverName = "docker"
 	}
 	if err != nil {
@@ -120,9 +119,9 @@ func (a *App) Health() error {
 		case "podman":
 			hint = "check OSG_PODMAN_SOCKET / podman.socket (systemctl --user start podman.socket)"
 		case "vm":
-			return fmt.Errorf("health: vm driver is a spike stub (see docs/MICROVM.md)")
+			return fmt.Errorf("health: vm driver is a spike stub (see docs/exp/MICROVM.md)")
 		case "kubernetes":
-			return fmt.Errorf("health: kubernetes driver is a spike stub (see docs/KUBERNETES.md)")
+			return fmt.Errorf("health: kubernetes driver is a spike stub (see docs/exp/KUBERNETES.md)")
 		}
 		return fmt.Errorf("health: %s client unavailable (%s)", a.DriverName, hint)
 	}
@@ -145,7 +144,7 @@ func (a *App) Health() error {
 	defer probeCancel()
 	probe := a.probeLandlock(probeCtx)
 	fmt.Printf("  landlock:         %s\n", probe)
-	fmt.Printf("  seccomp:          %s\n", docker.SeccompNote())
+	fmt.Printf("  seccomp:          %s\n", dockerdriver.SeccompNote())
 	for _, img := range []string{defaults.ImageLocal, defaults.ImageCursor} {
 		ok := a.Docker.ImagePresent(ctx, img)
 		state := "missing (task runtime:image:cli / task docker:agent:cursor)"
@@ -695,6 +694,17 @@ type SandboxCreateOpts struct {
 	ApprovalMode     string // manual|auto
 	NoKeep           bool   // delete sandbox after main command exits
 	ForceTTY         bool   // --tty force PTY for create-time exec
+
+	// Agent config injection (skills / MCP / AGENTS.md) — OpenShell-style /etc/osg.
+	AgentConfig     string   // --agent-config path to agent-config.yaml
+	Skills          []string // --skills PATH (repeatable)
+	MCPCursor       string   // --mcp-cursor PATH → $HOME/.cursor/mcp.json
+	MCPClaude       string   // --mcp-claude PATH → $HOME/.claude/mcp.json
+	NoAgentConfig   bool     // --no-agent-config skip builtin + user inject
+	Harness         string   // --harness cursor|claude
+	RuntimeMode     string   // --runtime-mode once|watch
+	AgentPrompt     string   // --agent-prompt PATH → agent-payload/agent-prompt.md
+	CursorCLIConfig string   // --cursor-cli-config PATH → $HOME/.cursor/cli-config.json
 }
 
 // SandboxCreate creates and starts a sandbox.
@@ -938,7 +948,7 @@ func (a *App) SandboxCreate(opt SandboxCreateOpts) error {
 		}
 	}
 	if spec.GPU {
-		fmt.Printf("gpu: CDI DeviceRequests enabled (see docs/GPU.md)\n")
+		fmt.Printf("gpu: CDI DeviceRequests enabled (see docs/exp/GPU.md)\n")
 	}
 	if !opt.NoVolume {
 		fmt.Printf("volume: osg-data-%s → %s (retained across stop/start)\n", h.Name, defaults.GuestData)
@@ -951,6 +961,9 @@ func (a *App) SandboxCreate(opt SandboxCreateOpts) error {
 		if err := a.Copy(opt.Upload, h.Name+":"+dest); err != nil {
 			return err
 		}
+	}
+	if err := a.installAgentConfig(h, opt); err != nil {
+		return fmt.Errorf("sandbox create agent-config: %w", err)
 	}
 	for _, p := range opt.Forwards {
 		if p > 0 {
@@ -1326,7 +1339,7 @@ func (a *App) Exec(opt ExecOpts) error {
 		return fmt.Errorf("exec: docker not available")
 	}
 	if opt.Name == "" || len(opt.Argv) == 0 {
-		return fmt.Errorf("usage: osg sandbox exec [--name] <name> [--workdir DIR] [--env K=V] -- <cmd>...")
+		return fmt.Errorf("usage: osg sandbox exec [--name] <name> [--workdir DIR] [--env K=V] -- CMD")
 	}
 	// Always overlay credential placeholders from effective policy so attach/refresh
 	// works without recreating the container (Docker Config.Env is immutable).

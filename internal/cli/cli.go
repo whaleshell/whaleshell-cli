@@ -1010,6 +1010,56 @@ func runSandbox(a *app.App, args []string) error {
 					return fmt.Errorf("--upload needs PATH")
 				}
 				opt.Upload = rest[i]
+			case "--agent-config":
+				i++
+				if i >= len(rest) {
+					return fmt.Errorf("--agent-config needs PATH (agent-config.yaml)")
+				}
+				opt.AgentConfig = rest[i]
+			case "--skills":
+				i++
+				if i >= len(rest) {
+					return fmt.Errorf("--skills needs PATH (skill dir or SKILL.md)")
+				}
+				opt.Skills = append(opt.Skills, rest[i])
+			case "--mcp-cursor":
+				i++
+				if i >= len(rest) {
+					return fmt.Errorf("--mcp-cursor needs PATH (mcp.json)")
+				}
+				opt.MCPCursor = rest[i]
+			case "--mcp-claude":
+				i++
+				if i >= len(rest) {
+					return fmt.Errorf("--mcp-claude needs PATH (mcp.json)")
+				}
+				opt.MCPClaude = rest[i]
+			case "--no-agent-config":
+				opt.NoAgentConfig = true
+			case "--harness":
+				i++
+				if i >= len(rest) {
+					return fmt.Errorf("--harness needs cursor|claude")
+				}
+				opt.Harness = rest[i]
+			case "--runtime-mode":
+				i++
+				if i >= len(rest) {
+					return fmt.Errorf("--runtime-mode needs once|watch")
+				}
+				opt.RuntimeMode = rest[i]
+			case "--agent-prompt":
+				i++
+				if i >= len(rest) {
+					return fmt.Errorf("--agent-prompt needs PATH")
+				}
+				opt.AgentPrompt = rest[i]
+			case "--cursor-cli-config":
+				i++
+				if i >= len(rest) {
+					return fmt.Errorf("--cursor-cli-config needs PATH (cli-config.json)")
+				}
+				opt.CursorCLIConfig = rest[i]
 			case "--cpu":
 				i++
 				if i >= len(rest) {

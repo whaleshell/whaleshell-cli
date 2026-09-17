@@ -108,7 +108,7 @@ Usage:
 
 Flags (OpenShell-aligned):
   --name NAME
-  --from base|ollama|…
+  --from base|ollama|cursor|claude|…
   --image IMAGE
   --policy PATH
   --cpu N --memory SIZE
@@ -117,6 +117,15 @@ Flags (OpenShell-aligned):
   --workspace PATH
   --label KEY=VALUE
   --driver-config-json JSON
+  --agent-config PATH     inject skills/MCP from agent-config.yaml
+  --skills PATH           extra skill dir or SKILL.md (repeatable)
+  --mcp-cursor PATH       → $HOME/.cursor/mcp.json
+  --mcp-claude PATH       → $HOME/.claude/mcp.json
+  --harness cursor|claude supervisor harness (default cursor)
+  --runtime-mode once|watch
+  --agent-prompt PATH     → /etc/osg/agent-payload/agent-prompt.md
+  --cursor-cli-config PATH → $HOME/.cursor/cli-config.json (attribution off by default)
+  --no-agent-config       skip builtin /etc/osg inject
 `,
 	"sandbox template": `osg sandbox template — workload templates
 
