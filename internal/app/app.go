@@ -32,6 +32,7 @@ import (
 	"github.com/zorneth/osg-driver/sidecar"
 	"github.com/zorneth/osg-proxy/proxy"
 	"github.com/zorneth/osg-runtime/inference"
+	"github.com/zorneth/osg-runtime/logging"
 	"github.com/zorneth/osg-runtime/sandbox"
 	"github.com/zorneth/osg-runtime/secrets"
 	"github.com/zorneth/osg-sdk/gatewayclient"
@@ -1523,6 +1524,10 @@ type ProxyOpts struct {
 
 // Proxy runs osg-proxy until interrupted.
 func (a *App) Proxy(opt ProxyOpts) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	log := logging.Setup(ctx, logging.Options{Service: "osg-proxy"})
+
 	listen := opt.Listen
 	if listen == "" {
 		listen = defaults.ProxyListenLocal()
@@ -1564,9 +1569,9 @@ func (a *App) Proxy(opt ProxyOpts) error {
 	if gwURL != "" && sandbox != "" {
 		gwURL = GuestGatewayURL(gwURL)
 		if err := refreshProxySecrets(srv, gwURL, sandbox); err != nil {
-			fmt.Fprintf(os.Stderr, "osg proxy: gateway secrets: %v (using process env)\n", err)
+			log.Warn("gateway secrets unavailable", "error", err)
 		} else {
-			fmt.Fprintf(os.Stderr, "osg proxy: secrets loaded from gateway for sandbox %s\n", sandbox)
+			log.Info("secrets loaded from gateway", "sandbox", sandbox)
 		}
 		go func() {
 			t := time.NewTicker(30 * time.Second)
@@ -1581,15 +1586,13 @@ func (a *App) Proxy(opt ProxyOpts) error {
 		if err := ca.WriteBundle(opt.CAOut); err != nil {
 			return fmt.Errorf("proxy ca-out: %w", err)
 		}
-		fmt.Fprintf(os.Stderr, "osg proxy: wrote MITM CA bundle to %s\n", opt.CAOut)
+		log.Info("wrote mitm ca bundle", "path", opt.CAOut)
 	}
 	proxy.LifecycleReady(audit, "proxy ready on "+listen)
-	fmt.Fprintf(os.Stderr, "osg proxy: listening on %s (allow_rules=%d mitm_ca=%v)\n", listen, len(doc.AllowRules()), srv.CA() != nil)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	log.Info("listening", "addr", listen, "allow_rules", len(doc.AllowRules()), "mitm_ca", srv.CA() != nil)
 	if path := strings.TrimSpace(opt.Policy); path != "" {
 		go srv.WatchPolicy(ctx, path, time.Second)
-		fmt.Fprintf(os.Stderr, "osg proxy: watching policy %s for hot-reload\n", path)
+		log.Info("watching policy for hot-reload", "path", path)
 	}
 	return srv.ListenAndServe(ctx, listen)
 }
