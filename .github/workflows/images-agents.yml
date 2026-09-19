@@ -61,6 +61,12 @@ jobs:
           repository: zorneth/osg-proxy
           path: osg-proxy
           ref: main
+
+      - name: Checkout slogx
+        uses: actions/checkout@v4
+        with:
+          repository: zorneth/slogx
+          path: slogx
       - uses: actions/setup-go@v5
         with:
           go-version: "1.27"

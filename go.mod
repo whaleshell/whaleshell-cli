@@ -33,7 +33,6 @@ require (
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
-	github.com/zorneth/slogx v0.0.0 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
@@ -53,6 +52,7 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sirupsen/logrus v1.10.2 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
+	github.com/zorneth/slogx v0.1.0-alpha.1 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.71.0 // indirect
 	go.opentelemetry.io/otel v1.46.0 // indirect
@@ -71,7 +71,6 @@ require (
 )
 
 replace (
-	github.com/zorneth/slogx => ../slogx
 	github.com/zorneth/osg-core => ../osg-core
 	github.com/zorneth/osg-display => ../osg-display
 	github.com/zorneth/osg-driver => ../osg-driver
@@ -79,4 +78,5 @@ replace (
 	github.com/zorneth/osg-proxy => ../osg-proxy
 	github.com/zorneth/osg-runtime => ../osg-runtime
 	github.com/zorneth/osg-sdk => ../osg-sdk
+	github.com/zorneth/slogx => ../slogx
 )
