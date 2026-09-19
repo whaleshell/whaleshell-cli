@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,6 +37,7 @@ import (
 	"github.com/zorneth/osg-runtime/sandbox"
 	"github.com/zorneth/osg-runtime/secrets"
 	"github.com/zorneth/osg-sdk/gatewayclient"
+	"github.com/zorneth/slogx"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 )
@@ -256,21 +258,29 @@ func (a *App) probeLandlock(ctx context.Context) string {
 
 // PolicyCheck loads and validates a policy YAML file.
 func (a *App) PolicyCheck(path string) error {
+	const op = "cli.policy.check"
+	log := cliOp(op, slog.String("path", path))
+	log.Info("checking policy")
 	doc, err := policy.Load(path)
 	if err != nil {
+		log.Error("failed to load policy", slogx.Err(err))
 		return fmt.Errorf("policy check: %w", err)
 	}
 	doc, err = a.mergeGatewayGlobal(doc)
 	if err != nil {
+		log.Error("failed to merge global policy", slogx.Err(err))
 		return fmt.Errorf("policy check: %w", err)
 	}
 	if err := doc.Validate(); err != nil {
+		log.Error("policy validation failed", slogx.Err(err))
 		return fmt.Errorf("policy check: %w", err)
 	}
 	var eng engine.Allowlist
 	if err := eng.Apply(doc); err != nil {
+		log.Error("policy engine apply failed", slogx.Err(err))
 		return fmt.Errorf("policy check: engine: %w", err)
 	}
+	log.Info("policy check ok", slog.Int("allow_rules", len(doc.AllowRules())), slog.String("harden", doc.HardenMode()))
 	fmt.Printf("policy check: ok version=%d harden=%s allow_rules=%d include_workdir=%v",
 		doc.Version, doc.HardenMode(), len(doc.AllowRules()),
 		doc.IncludeWorkdir())
@@ -348,15 +358,21 @@ func (a *App) PolicyGlobalClear() error {
 // Without a gateway, falls back to writing the file directly (no composition).
 // When wait is true, blocks until the bind file matches and settle elapsed.
 func (a *App) PolicySet(sandboxName, path string, wait bool) error {
+	const op = "cli.policy.set"
+	log := cliOp(op, slog.String("sandbox", sandboxName), slog.String("path", path), slog.Bool("wait", wait))
+	log.Info("setting sandbox policy")
 	b, err := os.ReadFile(path)
 	if err != nil {
+		log.Error("failed to read policy file", slogx.Err(err))
 		return err
 	}
 	doc, err := policy.Parse(b)
 	if err != nil {
+		log.Error("failed to parse policy", slogx.Err(err))
 		return fmt.Errorf("policy set: %w", err)
 	}
 	if err := doc.Validate(); err != nil {
+		log.Error("policy validation failed", slogx.Err(err))
 		return fmt.Errorf("policy set: %w", err)
 	}
 
@@ -710,12 +726,17 @@ type SandboxCreateOpts struct {
 
 // SandboxCreate creates and starts a sandbox.
 func (a *App) SandboxCreate(opt SandboxCreateOpts) error {
+	const op = "cli.sandbox.create"
+	log := cliOp(op)
 	if a.Sandboxes == nil || a.Sandboxes.Driver == nil {
-		return fmt.Errorf("sandbox create: docker not available")
+		err := fmt.Errorf("sandbox create: docker not available")
+		log.Error("docker unavailable", slogx.Err(err))
+		return err
 	}
 	if opt.Template != "" {
 		tpl, err := templates.Get(opt.Template)
 		if err != nil {
+			log.Error("failed to load template", slogx.Err(err), slog.String("template", opt.Template))
 			return fmt.Errorf("sandbox create template: %w", err)
 		}
 		mergeTemplateIntoCreate(&opt, tpl)
@@ -731,8 +752,11 @@ func (a *App) SandboxCreate(opt SandboxCreateOpts) error {
 	if name == "" {
 		name = filepath.Base(ws)
 	}
+	log = log.With(slog.String("sandbox", name), slog.String("workspace", ws))
+	log.Info("creating sandbox")
 	baseDoc, basePath, err := a.loadOrDenyAll(opt.Policy)
 	if err != nil {
+		log.Error("failed to load policy", slogx.Err(err))
 		return err
 	}
 	gwURL := opt.GatewayURL
@@ -889,8 +913,10 @@ func (a *App) SandboxCreate(opt SandboxCreateOpts) error {
 		Policy: doc,
 	})
 	if err != nil {
+		log.Error("failed to create sandbox", slogx.Err(err))
 		return err
 	}
+	log = log.With(slog.String("sandbox_id", shortID(string(h.ID))), slog.String("image", h.Image))
 	if gwURL != "" {
 		cli := gatewayclient.New(gwURL)
 		baseYAML := ""
@@ -931,6 +957,7 @@ func (a *App) SandboxCreate(opt SandboxCreateOpts) error {
 	if len(opt.Providers) > 0 {
 		notes = append(notes, "providers="+strings.Join(opt.Providers, ","))
 	}
+	log.Info("sandbox created", slog.String("notes", strings.Join(notes, " ")))
 	fmt.Printf("sandbox create: ok name=%s id=%s network=%s image=%s %s\n",
 		h.Name, shortID(string(h.ID)), h.Network, h.Image, strings.Join(notes, " "))
 	ui.Ok("sandbox %s ready (%s)", h.Name, strings.Join(notes, " "))
@@ -1048,9 +1075,14 @@ func (a *App) SandboxStatus(nameOrID string) error {
 
 // SandboxRemove deletes a sandbox.
 func (a *App) SandboxRemove(nameOrID string) error {
+	const op = "cli.sandbox.remove"
+	log := cliOp(op, slog.String("sandbox", nameOrID))
 	if a.Sandboxes == nil || a.Sandboxes.Driver == nil {
-		return fmt.Errorf("sandbox rm: docker not available")
+		err := fmt.Errorf("sandbox rm: docker not available")
+		log.Error("docker unavailable", slogx.Err(err))
+		return err
 	}
+	log.Info("removing sandbox")
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	name := nameOrID
@@ -1058,6 +1090,7 @@ func (a *App) SandboxRemove(nameOrID string) error {
 		name = info.Name
 	}
 	if err := a.Sandboxes.Remove(ctx, nameOrID); err != nil {
+		log.Error("failed to remove sandbox", slogx.Err(err))
 		return err
 	}
 	if cfg, _, err := gwconfig.Load(); err == nil {
@@ -1065,6 +1098,7 @@ func (a *App) SandboxRemove(nameOrID string) error {
 			_ = gatewayclient.New(u).DeleteSandbox(ctx, name)
 		}
 	}
+	log.Info("sandbox removed", slog.String("name", name))
 	fmt.Printf("sandbox rm: ok %s\n", nameOrID)
 	return nil
 }
@@ -1336,12 +1370,17 @@ type ExecOpts struct {
 
 // Exec runs a command in a sandbox.
 func (a *App) Exec(opt ExecOpts) error {
+	const op = "cli.sandbox.exec"
+	log := cliOp(op, slog.String("sandbox", opt.Name), slog.Int("argv_len", len(opt.Argv)))
 	if a.Sandboxes == nil || a.Sandboxes.Driver == nil {
-		return fmt.Errorf("exec: docker not available")
+		err := fmt.Errorf("exec: docker not available")
+		log.Error("docker unavailable", slogx.Err(err))
+		return err
 	}
 	if opt.Name == "" || len(opt.Argv) == 0 {
 		return fmt.Errorf("usage: osg sandbox exec [--name] <name> [--workdir DIR] [--env K=V] -- CMD")
 	}
+	log.Info("executing in sandbox", slog.Bool("tty", opt.TTY))
 	// Always overlay credential placeholders from effective policy so attach/refresh
 	// works without recreating the container (Docker Config.Env is immutable).
 	guestEnv := a.credentialPlaceholdersForSandbox(opt.Name)
@@ -1364,11 +1403,14 @@ func (a *App) Exec(opt ExecOpts) error {
 	}
 	a.emitProc(opt.Name, "EXIT", strings.Join(opt.Argv, " "), code)
 	if err != nil {
+		log.Error("exec failed", slogx.Err(err), slog.Int("exit_code", code))
 		return err
 	}
 	if res.ExitCode != 0 {
+		log.Info("exec finished with non-zero exit", slog.Int("exit_code", res.ExitCode))
 		return &ExitError{Code: res.ExitCode}
 	}
+	log.Info("exec finished", slog.Int("exit_code", 0))
 	return nil
 }
 
@@ -1524,9 +1566,12 @@ type ProxyOpts struct {
 
 // Proxy runs osg-proxy until interrupted.
 func (a *App) Proxy(opt ProxyOpts) error {
+	const op = "proxy.serve"
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	log := logging.Setup(ctx, logging.Options{Service: "osg-proxy"})
+	ctx = logging.ToContext(ctx, log)
+	log = log.With("op", op)
 
 	listen := opt.Listen
 	if listen == "" {

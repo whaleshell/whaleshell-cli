@@ -2,7 +2,9 @@
 package cli
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/zorneth/osg-cli/internal/providerflags"
 	"github.com/zorneth/osg-cli/internal/templates"
 	tuipkg "github.com/zorneth/osg-cli/internal/tui"
+	"github.com/zorneth/osg-runtime/logging"
 	"golang.org/x/term"
 )
 
@@ -33,6 +36,8 @@ func execute(a *app.App, args []string) error {
 		fmt.Println("run 'osg --help' for full usage")
 		return nil
 	}
+	log := logging.FromContext(context.Background()).With(slog.String("op", "cli.execute"), slog.String("cmd", args[0]))
+	log.Info("running command")
 	switch args[0] {
 	case "version":
 		fmt.Println(a.Version())

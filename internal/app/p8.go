@@ -7,6 +7,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"os"
 	"os/exec"
@@ -20,43 +21,60 @@ import (
 	"github.com/zorneth/osg-driver/mounts"
 	"github.com/zorneth/osg-driver/sidecar"
 	"github.com/zorneth/osg-sdk/gatewayclient"
+	"github.com/zorneth/slogx"
 	"golang.org/x/crypto/ssh"
 )
 
 // SandboxStop stops a sandbox without deleting network/volume.
 func (a *App) SandboxStop(name string) error {
+	const op = "cli.sandbox.stop"
+	log := cliOp(op, slog.String("sandbox", name))
 	if a.Sandboxes == nil || a.Sandboxes.Driver == nil {
-		return fmt.Errorf("sandbox stop: docker not available")
+		err := fmt.Errorf("sandbox stop: docker not available")
+		log.Error("docker unavailable", slogx.Err(err))
+		return err
 	}
+	log.Info("stopping sandbox")
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	info, err := a.Sandboxes.Driver.Inspect(ctx, name)
 	if err != nil {
+		log.Error("failed to inspect sandbox", slogx.Err(err))
 		return err
 	}
 	if err := a.Sandboxes.Driver.Stop(ctx, info.ID); err != nil {
+		log.Error("failed to stop sandbox", slogx.Err(err))
 		return err
 	}
 	a.touchGateway(ctx, info.Name, string(info.ID), info.Image, info.Network, "exited", nil)
+	log.Info("sandbox stopped")
 	fmt.Printf("sandbox stop: ok %s\n", name)
 	return nil
 }
 
 // SandboxStart starts a previously stopped sandbox (volume retained).
 func (a *App) SandboxStart(name string) error {
+	const op = "cli.sandbox.start"
+	log := cliOp(op, slog.String("sandbox", name))
 	if a.Sandboxes == nil || a.Sandboxes.Driver == nil {
-		return fmt.Errorf("sandbox start: docker not available")
+		err := fmt.Errorf("sandbox start: docker not available")
+		log.Error("docker unavailable", slogx.Err(err))
+		return err
 	}
+	log.Info("starting sandbox")
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	info, err := a.Sandboxes.Driver.Inspect(ctx, name)
 	if err != nil {
+		log.Error("failed to inspect sandbox", slogx.Err(err))
 		return err
 	}
 	if err := a.Sandboxes.Driver.Start(ctx, info.ID); err != nil {
+		log.Error("failed to start sandbox", slogx.Err(err))
 		return err
 	}
 	a.touchGateway(ctx, info.Name, string(info.ID), info.Image, info.Network, "running", nil)
+	log.Info("sandbox started")
 	fmt.Printf("sandbox start: ok %s\n", name)
 	return nil
 }

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"os/exec"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/zorneth/osg-core/defaults"
 	"github.com/zorneth/osg-sdk/gatewayclient"
+	"github.com/zorneth/slogx"
 )
 
 const localGatewayName = "local"
@@ -22,10 +24,13 @@ const localGatewayURL = "http://" + defaults.GatewayListen
 // osg-gateway on 127.0.0.1:7443 (sibling binary or PATH), registers it as "local",
 // and selects it.
 func (a *App) GatewayEnsure() error {
+	const op = "cli.gateway.ensure"
+	log := cliOp(op)
 	if u, err := a.currentGatewayURL(); err == nil && u != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		if _, err := gatewayclient.New(u).Healthz(ctx); err == nil {
+			log.Info("gateway already healthy", slog.String("url", u))
 			return nil
 		}
 	}
@@ -36,29 +41,35 @@ func (a *App) GatewayEnsure() error {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		if _, err := gatewayclient.New(localGatewayURL).Healthz(ctx); err == nil {
+			log.Info("using existing local gateway", slog.String("url", localGatewayURL))
 			fmt.Printf("gateway ensure: using existing %s\n", localGatewayURL)
 			return nil
 		}
 	}
 	bin, err := findGatewayBinary()
 	if err != nil {
+		log.Error("gateway binary not found", slogx.Err(err))
 		return fmt.Errorf("gateway ensure: %w\nStart manually: osg-gateway --listen %s\nThen: osg gateway add local --url %s && osg gateway select local",
 			err, defaults.GatewayListen, localGatewayURL)
 	}
 	logPath, err := gatewayLogPath()
 	if err != nil {
+		log.Error("failed to resolve gateway log path", slogx.Err(err))
 		return err
 	}
 	logF, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
+		log.Error("failed to open gateway log", slogx.Err(err))
 		return fmt.Errorf("gateway ensure: log: %w", err)
 	}
+	log.Info("starting local gateway", slog.String("bin", bin), slog.String("listen", defaults.GatewayListen))
 	cmd := exec.Command(bin, "--listen", defaults.GatewayListen)
 	cmd.Stdout = logF
 	cmd.Stderr = logF
 	cmd.SysProcAttr = gatewaySysProcAttr()
 	if err := cmd.Start(); err != nil {
 		_ = logF.Close()
+		log.Error("failed to start gateway", slogx.Err(err))
 		return fmt.Errorf("gateway ensure: start %s: %w", bin, err)
 	}
 	// Detach: do not wait; log file stays open in child.
@@ -74,12 +85,15 @@ func (a *App) GatewayEnsure() error {
 		if err == nil {
 			_ = a.GatewayAdd(localGatewayName, localGatewayURL)
 			_ = a.GatewaySelect(localGatewayName)
+			log.Info("local gateway ready", slog.Int("pid", cmd.Process.Pid), slog.String("log", logPath))
 			fmt.Printf("gateway ensure: started %s (pid %d, log %s)\n", localGatewayURL, cmd.Process.Pid, logPath)
 			return nil
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	return fmt.Errorf("gateway ensure: started %s but healthz not ready (see %s)", bin, logPath)
+	err = fmt.Errorf("gateway ensure: started %s but healthz not ready (see %s)", bin, logPath)
+	log.Error("gateway healthz timeout", slogx.Err(err))
+	return err
 }
 
 func portOpen(host string, port int) bool {

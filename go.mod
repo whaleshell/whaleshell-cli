@@ -12,6 +12,7 @@ require (
 	github.com/zorneth/osg-proxy v0.1.0-alpha.1
 	github.com/zorneth/osg-runtime v0.1.0-alpha.1
 	github.com/zorneth/osg-sdk v0.1.0-alpha.1
+	github.com/zorneth/slogx v0.1.0-alpha.1
 	golang.org/x/crypto v0.56.0
 	golang.org/x/term v0.46.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -52,7 +53,6 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sirupsen/logrus v1.10.2 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
-	github.com/zorneth/slogx v0.1.0-alpha.1 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.71.0 // indirect
 	go.opentelemetry.io/otel v1.46.0 // indirect
