@@ -33,7 +33,7 @@ require (
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
-	github.com/glaciforge/slogx v0.0.0 // indirect
+	github.com/zorneth/slogx v0.0.0 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
@@ -71,7 +71,7 @@ require (
 )
 
 replace (
-	github.com/glaciforge/slogx => ../slogx
+	github.com/zorneth/slogx => ../slogx
 	github.com/zorneth/osg-core => ../osg-core
 	github.com/zorneth/osg-display => ../osg-display
 	github.com/zorneth/osg-driver => ../osg-driver
