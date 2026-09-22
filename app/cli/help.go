@@ -166,7 +166,9 @@ Usage:
 	"gateway": `whaleshell gateway — manage gateways
 
 Usage:
-  whaleshell gateway add|remove|select|info|list|login|logout
+  whaleshell gateway ensure|add|remove|select|info|list|login|logout
+
+  ensure   start/select local gateway on 127.0.0.1:7443 if needed
 `,
 	"workspace": `whaleshell workspace — workspaces (gateway-backed)
 

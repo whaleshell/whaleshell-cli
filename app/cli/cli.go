@@ -321,9 +321,11 @@ func runInstall(a *service.App, args []string) error {
 
 func runGateway(a *service.App, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: whaleshell gateway add|remove|select|info|list|login|logout")
+		return fmt.Errorf("usage: whaleshell gateway ensure|add|remove|select|info|list|login|logout")
 	}
 	switch args[0] {
+	case "ensure":
+		return a.GatewayEnsure()
 	case "add":
 		parsed, err := osargs.ParseGatewayAdd(args[1:])
 		if err != nil {
