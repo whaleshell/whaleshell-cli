@@ -21,7 +21,7 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_PREFIX: ghcr.io/zorneth/osg/sandboxes
+  IMAGE_PREFIX: ghcr.io/whaleshell/osg/sandboxes
   # Local tag only — GHCR base is private to whaleshell-runtime; buildx container
   # driver cannot pull it. Always build FROM a local docker-tagged base.
   LOCAL_BASE: whaleshell-sandbox:base
@@ -73,27 +73,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          {
-            echo 'go 1.27.0'
-            echo 'use ('
-            for d in whaleshell-* slogx; do
-              if [[ -d "$d" ]]; then
-                echo "  ./$d"
-              fi
-            done
-            echo ')'
-            echo 'replace ('
-            for d in whaleshell-*; do
-              if [[ -d "$d" ]]; then
-                echo "  github.com/whaleshell/${d} v0.1.0-alpha.1 => ./$d"
-              fi
-            done
-            if [[ -d slogx ]]; then
-              echo '  github.com/whaleshell/slogx v0.1.0-alpha.1 => ./slogx'
-            fi
-            echo ')'
-          } > "${{ github.workspace }}/go.work"
-          echo "Wrote go.work:" && cat "${{ github.workspace }}/go.work"
+          cat > "${{ github.workspace }}/go.work" <<'EOF'
+          go 1.27.0
+          use (
+            ./whaleshell-runtime
+            ./whaleshell-core
+            ./whaleshell-driver
+            ./whaleshell-proxy
+            ./slogx
+          )
+          replace (
+            github.com/whaleshell/whaleshell-runtime v0.1.0-alpha.1 => ./whaleshell-runtime
+            github.com/whaleshell/whaleshell-core v0.1.0-alpha.1 => ./whaleshell-core
+            github.com/whaleshell/whaleshell-driver v0.1.0-alpha.1 => ./whaleshell-driver
+            github.com/whaleshell/whaleshell-proxy v0.1.0-alpha.1 => ./whaleshell-proxy
+            github.com/whaleshell/slogx v0.1.0-alpha.1 => ./slogx
+          )
+          EOF
+          # strip leading spaces from heredoc body
+          sed -i 's/^          //' "${{ github.workspace }}/go.work"
+          cat "${{ github.workspace }}/go.work"
+
 
       - uses: actions/setup-go@v5
         with:
@@ -114,6 +114,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build local base
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        env:
+          GOWORK: ${{ github.workspace }}/go.work
         run: |
           set -euo pipefail
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -C whaleshell-runtime -o images/sandbox/whaleshell-init ./cmd/whaleshell-init

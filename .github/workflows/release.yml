@@ -102,6 +102,8 @@ jobs:
           distribution: goreleaser
           version: "~> v2"
           workdir: whaleshell-cli
-          args: release --clean
+          args: release --clean --verbose
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GOWORK: ${{ github.workspace }}/go.work
+          GOTOOLCHAIN: local
