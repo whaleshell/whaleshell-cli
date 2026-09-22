@@ -1,0 +1,177 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 the whaleshell authors
+# SPDX-License-Identifier: MIT
+#
+# Nightly multi-arch binaries → GitHub Release tag `nightly` (always prerelease).
+# Install: curl …/install.sh | WHALESHELL_VERSION=nightly sh
+name: Nightly
+
+env:
+  CGO_ENABLED: "0"
+  GOWORK: ${{ github.workspace }}/go.work
+
+on:
+  schedule:
+    # 06:00 UTC
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nightly-${{ github.repository }}
+  cancel-in-progress: true
+
+jobs:
+  nightly:
+    name: Build & publish nightly
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout whaleshell-cli
+        uses: actions/checkout@v4
+        with:
+          path: whaleshell-cli
+          fetch-depth: 0
+
+      - name: Checkout sibling modules
+        run: |
+          set -euo pipefail
+          declare -A REMOTES=(
+            [whaleshell-core]=zorneth/osg-core
+            [whaleshell-display]=zorneth/osg-display
+            [whaleshell-driver]=zorneth/osg-driver
+            [whaleshell-providers]=zorneth/osg-providers
+            [whaleshell-proxy]=zorneth/osg-proxy
+            [whaleshell-runtime]=zorneth/osg-runtime
+            [whaleshell-sdk]=zorneth/osg-sdk
+            [whaleshell-gateway]=zorneth/osg-gateway
+            [slogx]=zorneth/slogx
+          )
+          for local in \
+            whaleshell-core whaleshell-display whaleshell-driver \
+            whaleshell-providers whaleshell-proxy whaleshell-runtime \
+            whaleshell-sdk whaleshell-gateway slogx
+          do
+            remote="${REMOTES[$local]}"
+            if ! git clone --depth 1 --branch main \
+              "https://github.com/${remote}.git" "${local}"; then
+              git clone --depth 1 "https://github.com/${remote}.git" "${local}"
+            fi
+          done
+
+      - name: Write go.work
+        run: |
+          set -euo pipefail
+          {
+            echo 'go 1.27.0'
+            echo 'use ('
+            for d in whaleshell-* slogx; do
+              if [[ -d "$d" ]]; then
+                echo "  ./$d"
+              fi
+            done
+            echo ')'
+            echo 'replace ('
+            for d in whaleshell-*; do
+              if [[ -d "$d" ]]; then
+                echo "  github.com/whaleshell/${d} v0.1.0-alpha.1 => ./$d"
+              fi
+            done
+            if [[ -d slogx ]]; then
+              echo '  github.com/whaleshell/slogx v0.1.0-alpha.1 => ./slogx'
+            fi
+            echo ')'
+          } > "${{ github.workspace }}/go.work"
+          echo "Wrote go.work:" && cat "${{ github.workspace }}/go.work"
+
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+          cache: true
+          cache-dependency-path: |
+            whaleshell-cli/go.sum
+            whaleshell-core/go.sum
+            whaleshell-runtime/go.sum
+            whaleshell-gateway/go.sum
+
+      - name: Cross-compile release matrix
+        working-directory: whaleshell-cli
+        run: |
+          set -euo pipefail
+          ver="0.0.0-nightly.$(date -u +%Y%m%d)+$(git rev-parse --short HEAD)"
+          echo "NIGHTLY_VERSION=${ver}" >> "$GITHUB_ENV"
+          out="${{ github.workspace }}/dist"
+          mkdir -p "$out"
+
+          archive_os() {
+            case "$1" in
+              linux) echo Linux ;;
+              darwin) echo Darwin ;;
+              windows) echo Windows ;;
+            esac
+          }
+          archive_arch() {
+            case "$1" in
+              amd64) echo x86_64 ;;
+              *) echo "$1" ;;
+            esac
+          }
+
+          build_cli() {
+            local goos="$1" goarch="$2" ext="${3:-}"
+            local name="whaleshell_$(archive_os "$goos")_$(archive_arch "$goarch")"
+            local bin="whaleshell${ext}"
+            echo "→ ${name}"
+            GOOS="$goos" GOARCH="$goarch" go build -trimpath \
+              -ldflags="-s -w -X main.version=${ver}" \
+              -o "${out}/${bin}" ./cmd/whaleshell
+            if [[ "$goos" == "windows" ]]; then
+              (cd "$out" && zip -q "${name}.zip" "$bin" && rm -f "$bin")
+            else
+              (cd "$out" && tar -czf "${name}.tar.gz" "$bin" && rm -f "$bin")
+            fi
+          }
+
+          build_cli linux amd64
+          build_cli linux arm64
+          build_cli darwin amd64
+          build_cli darwin arm64
+          build_cli windows amd64 .exe
+
+          if [[ -d ../whaleshell-gateway ]]; then
+            for goos in linux darwin; do
+              for goarch in amd64 arm64; do
+                name="whaleshell-gateway_$(archive_os "$goos")_$(archive_arch "$goarch")"
+                echo "→ ${name}"
+                GOOS="$goos" GOARCH="$goarch" go build -C ../whaleshell-gateway -trimpath -ldflags="-s -w" \
+                  -o "${out}/whaleshell-gateway" ./cmd/whaleshell-gateway
+                (cd "$out" && tar -czf "${name}.tar.gz" whaleshell-gateway && rm -f whaleshell-gateway)
+              done
+            done
+          fi
+
+          (cd "$out" && sha256sum ./*.tar.gz ./*.zip 2>/dev/null | tee checksums.txt)
+          cp install.sh "$out/"
+          printf '%s\n' "$ver" > "$out/VERSION"
+
+      - name: Publish GitHub Release (nightly / prerelease)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          name: "Nightly ${{ env.NIGHTLY_VERSION }}"
+          prerelease: true
+          make_latest: false
+          generate_release_notes: true
+          body: |
+            Automated nightly build from `main` (workspace modules).
+
+            **Not a stable release.** Prefer tagged `v0.x.y-alpha.N` for pinned alphas.
+
+            ### Install
+            ```bash
+            curl -LsSf https://raw.githubusercontent.com/zorneth/osg-cli/main/install.sh | WHALESHELL_VERSION=nightly sh
+            ```
+          files: dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

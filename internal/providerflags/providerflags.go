@@ -26,7 +26,7 @@ type CreateArgs struct {
 
 // ParseCreate accepts OpenShell form only:
 //
-//	osg provider create --name NAME --type PROFILE [--from-existing|--credential KEY]
+//	whaleshell provider create --name NAME --type PROFILE [--from-existing|--credential KEY]
 func ParseCreate(args []string, lookupEnv func(string) (string, bool)) (CreateArgs, error) {
 	if lookupEnv == nil {
 		lookupEnv = os.LookupEnv

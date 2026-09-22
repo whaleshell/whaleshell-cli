@@ -1,11 +1,11 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026 the osg authors
+# SPDX-FileCopyrightText: Copyright (c) 2026 the whaleshell authors
 # SPDX-License-Identifier: MIT
 #
 # OpenAI Codex CLI preinstalled.
-# Base (osg-runtime sandboxes/base) already ships NodeSource Node.js + npm —
+# Base (whaleshell-runtime sandboxes/base) already ships NodeSource Node.js + npm —
 # Debian's `npm` package conflicts with that nodejs (Conflicts: npm).
 
-ARG BASE_IMAGE=osg-sandbox:local
+ARG BASE_IMAGE=whaleshell-sandbox:local
 FROM ${BASE_IMAGE}
 
 ENTRYPOINT []
@@ -26,13 +26,13 @@ RUN npm install -g @openai/codex \
     && /usr/local/bin/codex --version || true \
     && npm cache clean --force
 
-RUN mkdir -p /osg/data/home/.local/bin /osg/data/bin /etc/profile.d \
-    && ln -sfn /usr/local/bin/codex /osg/data/home/.local/bin/codex \
-    && printf '%s\n' 'export PATH="/usr/local/bin:/osg/data/home/.local/bin:/osg/data/bin:$PATH"' > /etc/profile.d/osg-agent.sh
+RUN mkdir -p /whaleshell/data/home/.local/bin /whaleshell/data/bin /etc/profile.d \
+    && ln -sfn /usr/local/bin/codex /whaleshell/data/home/.local/bin/codex \
+    && printf '%s\n' 'export PATH="/usr/local/bin:/whaleshell/data/home/.local/bin:/whaleshell/data/bin:$PATH"' > /etc/profile.d/whaleshell-agent.sh
 
-ENV HOME=/osg/data/home \
-    PATH=/usr/local/bin:/osg/data/home/.local/bin:/osg/data/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
+ENV HOME=/whaleshell/data/home \
+    PATH=/usr/local/bin:/whaleshell/data/home/.local/bin:/whaleshell/data/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 
 WORKDIR /workspace
-ENTRYPOINT ["/usr/local/bin/osg-init"]
+ENTRYPOINT ["/usr/local/bin/whaleshell-init"]
 CMD ["--", "sleep", "infinity"]

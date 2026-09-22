@@ -1,4 +1,4 @@
-// Package tui implements `osg term` — k9s-like sandbox browser with live agent observation.
+// Package tui implements `whaleshell term` — k9s-like sandbox browser with live agent observation.
 package tui
 
 import (
@@ -12,8 +12,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/zorneth/osg-cli/internal/app"
-	"github.com/zorneth/osg-driver/driver"
+	"github.com/whaleshell/whaleshell-cli/internal/service"
+	"github.com/whaleshell/whaleshell-driver/driver"
 )
 
 var (
@@ -42,7 +42,7 @@ type Action struct {
 }
 
 type model struct {
-	app      *app.App
+	app      *service.App
 	items    []driver.Info
 	cursor   int
 	err      string
@@ -82,7 +82,7 @@ type logDoneMsg struct {
 }
 
 // Run starts the interactive terminal UI and returns the chosen action (if any).
-func Run(a *app.App) (Action, error) {
+func Run(a *service.App) (Action, error) {
 	m := model{app: a, width: 80, height: 24}
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	final, err := p.Run()
@@ -104,7 +104,7 @@ func tickCmd() tea.Cmd {
 	return tea.Tick(refreshEvery, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
 
-func refreshCmd(a *app.App) tea.Cmd {
+func refreshCmd(a *service.App) tea.Cmd {
 	return func() tea.Msg {
 		list, err := a.ListSandboxes()
 		return refreshMsg{items: list, err: err}
@@ -122,15 +122,15 @@ func (m *model) stopLogs() {
 	m.logErr = ""
 }
 
-func startLogStream(a *app.App, name string) (context.CancelFunc, <-chan tea.Msg) {
-	return startLogStreamOpts(a, app.LogsOpts{Names: []string{name}, Follow: true})
+func startLogStream(a *service.App, name string) (context.CancelFunc, <-chan tea.Msg) {
+	return startLogStreamOpts(a, service.LogsOpts{Names: []string{name}, Follow: true})
 }
 
-func startLogStreamAll(a *app.App) (context.CancelFunc, <-chan tea.Msg) {
-	return startLogStreamOpts(a, app.LogsOpts{All: true, Follow: true})
+func startLogStreamAll(a *service.App) (context.CancelFunc, <-chan tea.Msg) {
+	return startLogStreamOpts(a, service.LogsOpts{All: true, Follow: true})
 }
 
-func startLogStreamOpts(a *app.App, opt app.LogsOpts) (context.CancelFunc, <-chan tea.Msg) {
+func startLogStreamOpts(a *service.App, opt service.LogsOpts) (context.CancelFunc, <-chan tea.Msg) {
 	ctx, cancel := context.WithCancel(context.Background())
 	ch := make(chan tea.Msg, 64)
 	name := "*"
@@ -359,7 +359,7 @@ func (m model) View() string {
 
 func (m model) viewListPanel() string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("osg term") + "  " + statusStyle.Render(m.status) + "\n")
+	b.WriteString(titleStyle.Render("whaleshell term") + "  " + statusStyle.Render(m.status) + "\n")
 	b.WriteString(helpStyle.Render("agent observation: press l for live OCSF / sandbox logs") + "\n\n")
 	if m.err != "" {
 		b.WriteString("error: " + m.err + "\n")
@@ -382,7 +382,7 @@ func (m model) viewListPanel() string {
 
 func (m model) viewLogsPanel() string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("osg term") + "  " + panelStyle.Render("observe:"+m.logName) + "  " + statusStyle.Render(m.status) + "\n")
+	b.WriteString(titleStyle.Render("whaleshell term") + "  " + panelStyle.Render("observe:"+m.logName) + "  " + statusStyle.Render(m.status) + "\n")
 	b.WriteString(helpStyle.Render("live agent activity (OCSF NET/HTTP/PROC/CONFIG) · esc back · r restart · q quit") + "\n\n")
 	if m.logErr != "" {
 		b.WriteString(denyStyle.Render(m.logErr) + "\n")

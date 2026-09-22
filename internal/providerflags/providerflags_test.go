@@ -3,7 +3,7 @@ package providerflags_test
 import (
 	"testing"
 
-	"github.com/zorneth/osg-cli/internal/providerflags"
+	"github.com/whaleshell/whaleshell-cli/internal/providerflags"
 )
 
 func TestParseCreateOpenShell(t *testing.T) {

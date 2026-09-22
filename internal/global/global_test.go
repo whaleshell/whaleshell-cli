@@ -3,7 +3,7 @@ package global_test
 import (
 	"testing"
 
-	"github.com/zorneth/osg-cli/internal/global"
+	"github.com/whaleshell/whaleshell-cli/internal/global"
 )
 
 func TestParseGatewayAndOutput(t *testing.T) {

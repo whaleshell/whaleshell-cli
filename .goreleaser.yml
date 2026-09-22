@@ -1,0 +1,104 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 the whaleshell authors
+# SPDX-License-Identifier: MIT
+#
+# Tagged releases for whaleshell-cli (and companion gateway binary).
+# Corporate alpha/beta/rc tags are auto-marked as GitHub prereleases.
+version: 2
+
+project_name: whaleshell
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: whaleshell
+    main: ./cmd/whaleshell
+    binary: whaleshell
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+
+  - id: whaleshell-gateway
+    dir: ../whaleshell-gateway
+    main: ./cmd/whaleshell-gateway
+    binary: whaleshell-gateway
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+
+archives:
+  - id: cli
+    builds: [whaleshell]
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE*
+      - README*
+      - install.sh
+
+  - id: gateway
+    builds: [whaleshell-gateway]
+    name_template: >-
+      whaleshell-gateway_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end }}
+    formats: [tar.gz]
+    files:
+      - LICENSE*
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+
+release:
+  # Semver pre-release tags (v0.1.0-alpha.1, -beta.N, -rc.N) → GitHub prerelease.
+  # Same pattern as HashiCorp / typical GoReleaser corporate CLIs.
+  prerelease: auto
+  name_template: "{{ .Tag }}"
+  footer: |
+    ## Install
+
+    ```bash
+    curl -LsSf https://raw.githubusercontent.com/whaleshell/whaleshell-cli/main/install.sh | sh
+    ```
+
+    Pin a tag:
+
+    ```bash
+    curl -LsSf https://raw.githubusercontent.com/whaleshell/whaleshell-cli/main/install.sh | WHALESHELL_VERSION={{ .Tag }} sh
+    ```
+
+    **Alpha / pre-release:** APIs may change. See VERSIONING.md in the org hub.
+
+snapshot:
+  version_template: "{{ .Version }}-next"

@@ -1,9 +1,9 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026 zorneth
+# SPDX-FileCopyrightText: Copyright (c) 2026 whaleshell
 # SPDX-License-Identifier: MIT
 
 # Builtin GitHub provider (OpenShell-style level C).
 # Host: export GITHUB_TOKEN=… (or GH_TOKEN). Values stay on the host;
-# guest sees osg:resolve:env:GITHUB_TOKEN and the sidecar rewrites on egress.
+# guest sees whaleshell:resolve:env:GITHUB_TOKEN and the sidecar rewrites on egress.
 
 id: github
 display_name: GitHub

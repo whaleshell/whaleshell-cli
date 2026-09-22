@@ -5,50 +5,50 @@ vars:
 
 tasks:
   agent:cursor:
-    desc: Build osg-sandbox:cursor (Cursor Agent CLI)
+    desc: Build whaleshell-sandbox:cursor (Cursor Agent CLI)
     cmds:
       - |
         set -euo pipefail
         ORG="{{.ORG}}"
-        if ! docker image inspect osg-sandbox:local >/dev/null 2>&1; then
-          echo "building base osg-sandbox:local …"
+        if ! docker image inspect whaleshell-sandbox:local >/dev/null 2>&1; then
+          echo "building base whaleshell-sandbox:local …"
           task -d "$ORG" runtime:image:cli
         fi
-        docker build -t osg-sandbox:cursor \
-          --build-arg BASE_IMAGE=osg-sandbox:local \
-          -f "$ORG/osg-cli/docker/agents/cursor/Dockerfile" \
-          "$ORG/osg-cli/docker/agents/cursor"
-        echo "ok: osg-sandbox:cursor"
+        docker build -t whaleshell-sandbox:cursor \
+          --build-arg BASE_IMAGE=whaleshell-sandbox:local \
+          -f "$ORG/whaleshell-cli/docker/agents/cursor/Dockerfile" \
+          "$ORG/whaleshell-cli/docker/agents/cursor"
+        echo "ok: whaleshell-sandbox:cursor"
 
   agent:claude:
-    desc: Build osg-sandbox:claude (Claude Code CLI)
+    desc: Build whaleshell-sandbox:claude (Claude Code CLI)
     cmds:
       - |
         set -euo pipefail
         ORG="{{.ORG}}"
-        if ! docker image inspect osg-sandbox:local >/dev/null 2>&1; then
+        if ! docker image inspect whaleshell-sandbox:local >/dev/null 2>&1; then
           task -d "$ORG" runtime:image:cli
         fi
-        docker build -t osg-sandbox:claude \
-          --build-arg BASE_IMAGE=osg-sandbox:local \
-          -f "$ORG/osg-cli/docker/agents/claude/Dockerfile" \
-          "$ORG/osg-cli/docker/agents/claude"
-        echo "ok: osg-sandbox:claude"
+        docker build -t whaleshell-sandbox:claude \
+          --build-arg BASE_IMAGE=whaleshell-sandbox:local \
+          -f "$ORG/whaleshell-cli/docker/agents/claude/Dockerfile" \
+          "$ORG/whaleshell-cli/docker/agents/claude"
+        echo "ok: whaleshell-sandbox:claude"
 
   agent:codex:
-    desc: Build osg-sandbox:codex (OpenAI Codex CLI)
+    desc: Build whaleshell-sandbox:codex (OpenAI Codex CLI)
     cmds:
       - |
         set -euo pipefail
         ORG="{{.ORG}}"
-        if ! docker image inspect osg-sandbox:local >/dev/null 2>&1; then
+        if ! docker image inspect whaleshell-sandbox:local >/dev/null 2>&1; then
           task -d "$ORG" runtime:image:cli
         fi
-        docker build -t osg-sandbox:codex \
-          --build-arg BASE_IMAGE=osg-sandbox:local \
-          -f "$ORG/osg-cli/docker/agents/codex/Dockerfile" \
-          "$ORG/osg-cli/docker/agents/codex"
-        echo "ok: osg-sandbox:codex"
+        docker build -t whaleshell-sandbox:codex \
+          --build-arg BASE_IMAGE=whaleshell-sandbox:local \
+          -f "$ORG/whaleshell-cli/docker/agents/codex/Dockerfile" \
+          "$ORG/whaleshell-cli/docker/agents/codex"
+        echo "ok: whaleshell-sandbox:codex"
 
   agent:all:
     desc: Build cursor + claude + codex images

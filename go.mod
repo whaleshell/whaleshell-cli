@@ -1,18 +1,18 @@
-module github.com/zorneth/osg-cli
+module github.com/whaleshell/whaleshell-cli
 
 go 1.27.0
 
 require (
 	github.com/charmbracelet/bubbletea v1.3.4
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/zorneth/osg-core v0.1.0-alpha.1
-	github.com/zorneth/osg-display v0.1.0-alpha.1
-	github.com/zorneth/osg-driver v0.1.0-alpha.1
-	github.com/zorneth/osg-providers v0.1.0-alpha.1
-	github.com/zorneth/osg-proxy v0.1.0-alpha.1
-	github.com/zorneth/osg-runtime v0.1.0-alpha.1
-	github.com/zorneth/osg-sdk v0.1.0-alpha.1
-	github.com/zorneth/slogx v0.1.0-alpha.1
+	github.com/whaleshell/whaleshell-core v0.1.0-alpha.1
+	github.com/whaleshell/whaleshell-display v0.1.0-alpha.1
+	github.com/whaleshell/whaleshell-driver v0.1.0-alpha.1
+	github.com/whaleshell/whaleshell-providers v0.1.0-alpha.1
+	github.com/whaleshell/whaleshell-proxy v0.1.0-alpha.1
+	github.com/whaleshell/whaleshell-runtime v0.1.0-alpha.1
+	github.com/whaleshell/whaleshell-sdk v0.1.0-alpha.1
+	github.com/whaleshell/slogx v0.1.0-alpha.1
 	golang.org/x/crypto v0.56.0
 	golang.org/x/term v0.46.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -68,15 +68,4 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260819154853-08b0e4226688 // indirect
 	google.golang.org/grpc v1.83.1 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
-)
-
-replace (
-	github.com/zorneth/osg-core => ../osg-core
-	github.com/zorneth/osg-display => ../osg-display
-	github.com/zorneth/osg-driver => ../osg-driver
-	github.com/zorneth/osg-providers => ../osg-providers
-	github.com/zorneth/osg-proxy => ../osg-proxy
-	github.com/zorneth/osg-runtime => ../osg-runtime
-	github.com/zorneth/osg-sdk => ../osg-sdk
-	github.com/zorneth/slogx => ../slogx
 )

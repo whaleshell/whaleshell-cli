@@ -1,0 +1,105 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 the whaleshell authors
+# SPDX-License-Identifier: MIT
+#
+# Tagged releases via GoReleaser. Semver pre-release suffixes → GitHub prerelease
+# (prerelease: auto) — same pattern as HashiCorp / many Go corporate CLIs.
+name: Release
+
+env:
+  CGO_ENABLED: "0"
+  GOWORK: ${{ github.workspace }}/go.work
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to rebuild (e.g. v0.1.0-alpha.1)"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: GoReleaser
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout whaleshell-cli
+        uses: actions/checkout@v4
+        with:
+          path: whaleshell-cli
+          fetch-depth: 0
+
+      - name: Checkout sibling modules
+        run: |
+          set -euo pipefail
+          declare -A REMOTES=(
+            [whaleshell-core]=zorneth/osg-core
+            [whaleshell-display]=zorneth/osg-display
+            [whaleshell-driver]=zorneth/osg-driver
+            [whaleshell-providers]=zorneth/osg-providers
+            [whaleshell-proxy]=zorneth/osg-proxy
+            [whaleshell-runtime]=zorneth/osg-runtime
+            [whaleshell-sdk]=zorneth/osg-sdk
+            [whaleshell-gateway]=zorneth/osg-gateway
+            [slogx]=zorneth/slogx
+          )
+          for local in \
+            whaleshell-core whaleshell-display whaleshell-driver \
+            whaleshell-providers whaleshell-proxy whaleshell-runtime \
+            whaleshell-sdk whaleshell-gateway slogx
+          do
+            remote="${REMOTES[$local]}"
+            if ! git clone --depth 1 --branch main \
+              "https://github.com/${remote}.git" "${local}"; then
+              git clone --depth 1 "https://github.com/${remote}.git" "${local}"
+            fi
+          done
+
+      - name: Write go.work
+        run: |
+          set -euo pipefail
+          {
+            echo 'go 1.27.0'
+            echo 'use ('
+            for d in whaleshell-* slogx; do
+              if [[ -d "$d" ]]; then
+                echo "  ./$d"
+              fi
+            done
+            echo ')'
+            echo 'replace ('
+            for d in whaleshell-*; do
+              if [[ -d "$d" ]]; then
+                echo "  github.com/whaleshell/${d} v0.1.0-alpha.1 => ./$d"
+              fi
+            done
+            if [[ -d slogx ]]; then
+              echo '  github.com/whaleshell/slogx v0.1.0-alpha.1 => ./slogx'
+            fi
+            echo ')'
+          } > "${{ github.workspace }}/go.work"
+          echo "Wrote go.work:" && cat "${{ github.workspace }}/go.work"
+
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+          cache: true
+          cache-dependency-path: |
+            whaleshell-cli/go.sum
+            whaleshell-core/go.sum
+            whaleshell-gateway/go.sum
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          workdir: whaleshell-cli
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

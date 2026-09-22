@@ -1,7 +1,7 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026 zorneth
+# SPDX-FileCopyrightText: Copyright (c) 2026 whaleshell
 # SPDX-License-Identifier: MIT
 #
-# Cursor Agent + GitHub write (zorneth) in one base policy.
+# Cursor Agent + GitHub write (whaleshell) in one base policy.
 # Use with: --from cursor --provider gh -- agent
 # Cursor endpoints live in base (not only provider composition) so agent works
 # even before/without a cursor provider instance. gh provider still supplies tokens.
@@ -23,7 +23,7 @@ filesystem_policy:
   - /tmp
   - /dev/null
   - /workspace
-  - /osg/data
+  - /whaleshell/data
   - /sandbox
 landlock:
   compatibility: best_effort
@@ -139,8 +139,8 @@ network_policies:
       ports:
       - 80
       - 443
-  github-git-zorneth:
-    name: github-git-zorneth
+  github-git-whaleshell:
+    name: github-git-whaleshell
     endpoints:
     - host: github.com
       port: 443
@@ -153,24 +153,24 @@ network_policies:
       rules:
       - allow:
           method: GET
-          path: /zorneth/**
+          path: /whaleshell/**
       - allow:
           method: HEAD
-          path: /zorneth/**
+          path: /whaleshell/**
       - allow:
           method: OPTIONS
-          path: /zorneth/**
+          path: /whaleshell/**
       - allow:
           method: POST
-          path: /zorneth/**/git-upload-pack
+          path: /whaleshell/**/git-upload-pack
       - allow:
           method: POST
-          path: /zorneth/**/git-receive-pack
+          path: /whaleshell/**/git-receive-pack
     binaries:
     - path: /usr/bin/git
     - path: /usr/local/bin/git
-  github-api-zorneth:
-    name: github-api-zorneth
+  github-api-whaleshell:
+    name: github-api-whaleshell
     endpoints:
     - host: api.github.com
       port: 443
@@ -183,31 +183,31 @@ network_policies:
       rules:
       - allow:
           method: GET
-          path: /repos/zorneth/**
+          path: /repos/whaleshell/**
       - allow:
           method: HEAD
-          path: /repos/zorneth/**
+          path: /repos/whaleshell/**
       - allow:
           method: POST
-          path: /repos/zorneth/**
+          path: /repos/whaleshell/**
       - allow:
           method: PUT
-          path: /repos/zorneth/**
+          path: /repos/whaleshell/**
       - allow:
           method: PATCH
-          path: /repos/zorneth/**
+          path: /repos/whaleshell/**
       - allow:
           method: DELETE
-          path: /repos/zorneth/**
+          path: /repos/whaleshell/**
       - allow:
           method: POST
-          path: /orgs/zorneth/repos
+          path: /orgs/whaleshell/repos
       - allow:
           method: GET
-          path: /orgs/zorneth
+          path: /orgs/whaleshell
       - allow:
           method: GET
-          path: /orgs/zorneth/**
+          path: /orgs/whaleshell/**
       - allow:
           method: POST
           path: /user/repos

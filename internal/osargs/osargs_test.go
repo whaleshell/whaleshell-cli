@@ -3,7 +3,7 @@ package osargs_test
 import (
 	"testing"
 
-	"github.com/zorneth/osg-cli/internal/osargs"
+	"github.com/whaleshell/whaleshell-cli/internal/osargs"
 )
 
 func TestParseGatewayAddOpenShell(t *testing.T) {

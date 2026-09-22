@@ -1,6 +1,6 @@
-# Roadmap — osg-cli
+# Roadmap — whaleshell-cli
 
-Status: **v0.1.0-alpha.1** (alpha) · Depends on the full osg module set `v0.1.0-alpha.1`
+Status: **v0.1.0-alpha.1** (alpha) · Depends on the full whaleshell module set `v0.1.0-alpha.1`
 
 ## This module
 

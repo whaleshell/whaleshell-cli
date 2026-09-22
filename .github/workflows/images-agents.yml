@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2026 the osg authors
+# SPDX-FileCopyrightText: Copyright (c) 2026 the whaleshell authors
 # SPDX-License-Identifier: MIT
 name: images-agents
 
@@ -22,9 +22,10 @@ permissions:
 env:
   REGISTRY: ghcr.io
   IMAGE_PREFIX: ghcr.io/zorneth/osg/sandboxes
-  # Local tag only — GHCR base is private to osg-runtime; buildx container
+  # Local tag only — GHCR base is private to whaleshell-runtime; buildx container
   # driver cannot pull it. Always build FROM a local docker-tagged base.
-  LOCAL_BASE: osg-sandbox:base
+  LOCAL_BASE: whaleshell-sandbox:base
+  GOWORK: ${{ github.workspace }}/go.work
 
 jobs:
   build:
@@ -36,30 +37,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          path: osg-cli
-      - name: Checkout osg-runtime
+          path: whaleshell-cli
+      - name: Checkout whaleshell-runtime
         uses: actions/checkout@v4
         with:
           repository: zorneth/osg-runtime
-          path: osg-runtime
+          path: whaleshell-runtime
           ref: main
-      - name: Checkout osg-core
+      - name: Checkout whaleshell-core
         uses: actions/checkout@v4
         with:
           repository: zorneth/osg-core
-          path: osg-core
+          path: whaleshell-core
           ref: main
-      - name: Checkout osg-driver
+      - name: Checkout whaleshell-driver
         uses: actions/checkout@v4
         with:
           repository: zorneth/osg-driver
-          path: osg-driver
+          path: whaleshell-driver
           ref: main
-      - name: Checkout osg-proxy
+      - name: Checkout whaleshell-proxy
         uses: actions/checkout@v4
         with:
           repository: zorneth/osg-proxy
-          path: osg-proxy
+          path: whaleshell-proxy
           ref: main
 
       - name: Checkout slogx
@@ -67,6 +68,31 @@ jobs:
         with:
           repository: zorneth/slogx
           path: slogx
+      - name: Write go.work
+        run: |
+          set -euo pipefail
+          {
+            echo 'go 1.27.0'
+            echo 'use ('
+            for d in whaleshell-* slogx; do
+              if [[ -d "$d" ]]; then
+                echo "  ./$d"
+              fi
+            done
+            echo ')'
+            echo 'replace ('
+            for d in whaleshell-*; do
+              if [[ -d "$d" ]]; then
+                echo "  github.com/whaleshell/${d} v0.1.0-alpha.1 => ./$d"
+              fi
+            done
+            if [[ -d slogx ]]; then
+              echo '  github.com/whaleshell/slogx v0.1.0-alpha.1 => ./slogx'
+            fi
+            echo ')'
+          } > "${{ github.workspace }}/go.work"
+          echo "Wrote go.work:" && cat "${{ github.workspace }}/go.work"
+
       - uses: actions/setup-go@v5
         with:
           go-version: "1.27"
@@ -85,10 +111,10 @@ jobs:
       - name: Build local base
         run: |
           set -euo pipefail
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -C osg-runtime -o images/sandbox/osg-init ./cmd/osg-init
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -C whaleshell-runtime -o images/sandbox/whaleshell-init ./cmd/whaleshell-init
           docker build -t "${LOCAL_BASE}" --target cli \
-            -f osg-runtime/images/sandbox/Dockerfile \
-            osg-runtime/images/sandbox
+            -f whaleshell-runtime/images/sandbox/Dockerfile \
+            whaleshell-runtime/images/sandbox
       - name: Meta
         id: meta
         uses: docker/metadata-action@v5
@@ -102,8 +128,8 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: osg-cli/docker/agents/${{ matrix.agent }}
-          file: osg-cli/docker/agents/${{ matrix.agent }}/Dockerfile
+          context: whaleshell-cli/docker/agents/${{ matrix.agent }}
+          file: whaleshell-cli/docker/agents/${{ matrix.agent }}/Dockerfile
           platforms: linux/amd64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}

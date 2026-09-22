@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zorneth/osg-cli/internal/policywait"
+	"github.com/whaleshell/whaleshell-cli/internal/policywait"
 )
 
 func TestFileAppliedSuccess(t *testing.T) {

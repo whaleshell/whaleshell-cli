@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: MIT
 #
 # Cursor Agent + GitHub push/create-repo base policy.
-# Replace YOUR_ORG with your GitHub org/user (sed -i '' 's/YOUR_ORG/zorneth/g' …).
+# Replace YOUR_ORG with your GitHub org/user (sed -i '' 's/YOUR_ORG/whaleshell/g' …).
 #
-#   osg sandbox create --name cursor --from cursor \
-#     --policy osg-cli/policies/cursor-github-push.yaml \
+#   whaleshell sandbox create --name cursor --from cursor \
+#     --policy whaleshell-cli/policies/cursor-github-push.yaml \
 #     --provider cursor --provider gh
 
 version: 1
@@ -25,7 +25,7 @@ filesystem_policy:
   - /tmp
   - /dev/null
   - /workspace
-  - /osg/data
+  - /whaleshell/data
   - /sandbox
 landlock:
   compatibility: best_effort

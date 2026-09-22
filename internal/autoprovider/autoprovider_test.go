@@ -3,7 +3,7 @@ package autoprovider_test
 import (
 	"testing"
 
-	"github.com/zorneth/osg-cli/internal/autoprovider"
+	"github.com/whaleshell/whaleshell-cli/internal/autoprovider"
 )
 
 func TestMergeOffIgnoresInferred(t *testing.T) {

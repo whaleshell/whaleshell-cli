@@ -2,11 +2,11 @@
 *.test
 *.out
 /osg
-/osg-init
-/osg-gateway
+/whaleshell-init
+/whaleshell-gateway
 /osg-linux-*
 /osg-darwin-*
 /osg-windows-*
 .DS_Store
-/osg-gateway-*
-/osg-cli/
+/whaleshell-gateway-*
+/whaleshell-cli/
