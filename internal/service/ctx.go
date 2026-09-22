@@ -44,10 +44,3 @@ func (a *App) apiCtx() context.Context {
 	context.AfterFunc(ctx, cancel)
 	return ctx
 }
-
-// apiCtxLong is apiCtx with TimeoutAPILong.
-func (a *App) apiCtxLong() context.Context {
-	ctx, cancel := a.withTimeout(TimeoutAPILong)
-	context.AfterFunc(ctx, cancel)
-	return ctx
-}

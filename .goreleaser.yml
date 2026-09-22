@@ -89,13 +89,13 @@ release:
     ## Install
 
     ```bash
-    curl -LsSf https://raw.githubusercontent.com/whaleshell/whaleshell-cli/main/install.sh | sh
+    curl -LsSf https://raw.githubusercontent.com/whaleshell/osg-cli/main/install.sh | sh
     ```
 
     Pin a tag:
 
     ```bash
-    curl -LsSf https://raw.githubusercontent.com/whaleshell/whaleshell-cli/main/install.sh | WHALESHELL_VERSION={{ .Tag }} sh
+    curl -LsSf https://raw.githubusercontent.com/whaleshell/osg-cli/main/install.sh | WHALESHELL_VERSION={{ .Tag }} sh
     ```
 
     **Alpha / pre-release:** APIs may change. See VERSIONING.md in the org hub.

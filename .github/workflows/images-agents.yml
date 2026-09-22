@@ -41,34 +41,36 @@ jobs:
       - name: Checkout whaleshell-runtime
         uses: actions/checkout@v4
         with:
-          repository: zorneth/osg-runtime
+          repository: whaleshell/osg-runtime
           path: whaleshell-runtime
           ref: main
       - name: Checkout whaleshell-core
         uses: actions/checkout@v4
         with:
-          repository: zorneth/osg-core
+          repository: whaleshell/osg-core
           path: whaleshell-core
           ref: main
       - name: Checkout whaleshell-driver
         uses: actions/checkout@v4
         with:
-          repository: zorneth/osg-driver
+          repository: whaleshell/osg-driver
           path: whaleshell-driver
           ref: main
       - name: Checkout whaleshell-proxy
         uses: actions/checkout@v4
         with:
-          repository: zorneth/osg-proxy
+          repository: whaleshell/osg-proxy
           path: whaleshell-proxy
           ref: main
 
       - name: Checkout slogx
         uses: actions/checkout@v4
         with:
-          repository: zorneth/slogx
+          repository: whaleshell/slogx
           path: slogx
       - name: Write go.work
+        working-directory: ${{ github.workspace }}
+        shell: bash
         run: |
           set -euo pipefail
           {
@@ -97,6 +99,9 @@ jobs:
         with:
           go-version: "1.27"
           cache: true
+          cache-dependency-path: |
+            whaleshell-*/go.sum
+            slogx/go.sum
       # docker driver sees locally tagged images (container driver cannot).
       - uses: docker/setup-buildx-action@v3
         with:

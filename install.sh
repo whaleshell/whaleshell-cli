@@ -5,18 +5,18 @@
 # Install the whaleshell CLI from a GitHub release (OpenShell-style one-liner).
 #
 # Usage:
-#   curl -LsSf https://raw.githubusercontent.com/whaleshell/whaleshell-cli/main/install.sh | sh
+#   curl -LsSf https://raw.githubusercontent.com/whaleshell/osg-cli/main/install.sh | sh
 #
 # Environment:
 #   WHALESHELL_VERSION      Release tag (default: latest non-draft release; use
 #                           "nightly" for the moving nightly build)
 #   WHALESHELL_INSTALL_DIR  Install directory (default: ~/.local/bin)
-#   WHALESHELL_REPO         Override owner/name (default: whaleshell/whaleshell-cli)
+#   WHALESHELL_REPO         Override owner/name (default: whaleshell/osg-cli)
 #
 set -eu
 
 APP_NAME="whaleshell"
-REPO="${WHALESHELL_REPO:-whaleshell/whaleshell-cli}"
+REPO="${WHALESHELL_REPO:-whaleshell/osg-cli}"
 GITHUB_URL="https://github.com/${REPO}"
 API_URL="https://api.github.com/repos/${REPO}"
 

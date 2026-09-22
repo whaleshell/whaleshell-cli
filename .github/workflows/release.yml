@@ -37,15 +37,15 @@ jobs:
         run: |
           set -euo pipefail
           declare -A REMOTES=(
-            [whaleshell-core]=zorneth/osg-core
-            [whaleshell-display]=zorneth/osg-display
-            [whaleshell-driver]=zorneth/osg-driver
-            [whaleshell-providers]=zorneth/osg-providers
-            [whaleshell-proxy]=zorneth/osg-proxy
-            [whaleshell-runtime]=zorneth/osg-runtime
-            [whaleshell-sdk]=zorneth/osg-sdk
-            [whaleshell-gateway]=zorneth/osg-gateway
-            [slogx]=zorneth/slogx
+            [whaleshell-core]=whaleshell/osg-core
+            [whaleshell-display]=whaleshell/osg-display
+            [whaleshell-driver]=whaleshell/osg-driver
+            [whaleshell-providers]=whaleshell/osg-providers
+            [whaleshell-proxy]=whaleshell/osg-proxy
+            [whaleshell-runtime]=whaleshell/osg-runtime
+            [whaleshell-sdk]=whaleshell/osg-sdk
+            [whaleshell-gateway]=whaleshell/osg-gateway
+            [slogx]=whaleshell/slogx
           )
           for local in \
             whaleshell-core whaleshell-display whaleshell-driver \
@@ -60,6 +60,8 @@ jobs:
           done
 
       - name: Write go.work
+        working-directory: ${{ github.workspace }}
+        shell: bash
         run: |
           set -euo pipefail
           {
