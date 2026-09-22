@@ -21,7 +21,7 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_PREFIX: ghcr.io/whaleshell/osg/sandboxes
+  IMAGE_PREFIX: ghcr.io/whaleshell/whaleshell/sandboxes
   # Local tag only — GHCR base is private to whaleshell-runtime; buildx container
   # driver cannot pull it. Always build FROM a local docker-tagged base.
   LOCAL_BASE: whaleshell-sandbox:base
@@ -41,25 +41,25 @@ jobs:
       - name: Checkout whaleshell-runtime
         uses: actions/checkout@v4
         with:
-          repository: whaleshell/osg-runtime
+          repository: whaleshell/whaleshell-runtime
           path: whaleshell-runtime
           ref: main
       - name: Checkout whaleshell-core
         uses: actions/checkout@v4
         with:
-          repository: whaleshell/osg-core
+          repository: whaleshell/whaleshell-core
           path: whaleshell-core
           ref: main
       - name: Checkout whaleshell-driver
         uses: actions/checkout@v4
         with:
-          repository: whaleshell/osg-driver
+          repository: whaleshell/whaleshell-driver
           path: whaleshell-driver
           ref: main
       - name: Checkout whaleshell-proxy
         uses: actions/checkout@v4
         with:
-          repository: whaleshell/osg-proxy
+          repository: whaleshell/whaleshell-proxy
           path: whaleshell-proxy
           ref: main
 

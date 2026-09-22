@@ -6,6 +6,8 @@ These YAML files are **hand-authored starters** for the `whaleshell` CLI, not ge
 |------|------|
 | [`default.yaml`](./default.yaml) | Generic sandbox: default-deny network, Anthropic/OpenAI inference presets, no display |
 | [`cursor.yaml`](./cursor.yaml) | Cursor Agent (C1): allowlist for `*.cursor.sh` / `*.cursor.com`, apt/debian, credential keys |
+| [`github-push-whaleshell.yaml`](./github-push-whaleshell.yaml) | GitHub write widen for org `whaleshell` (create repo + push) |
+| [`cursor-github-push-whaleshell.yaml`](./cursor-github-push-whaleshell.yaml) | Cursor allowlist + GitHub write for org `whaleshell` |
 
 ## Compared with OpenShell
 

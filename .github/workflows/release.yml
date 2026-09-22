@@ -37,14 +37,14 @@ jobs:
         run: |
           set -euo pipefail
           declare -A REMOTES=(
-            [whaleshell-core]=whaleshell/osg-core
-            [whaleshell-display]=whaleshell/osg-display
-            [whaleshell-driver]=whaleshell/osg-driver
-            [whaleshell-providers]=whaleshell/osg-providers
-            [whaleshell-proxy]=whaleshell/osg-proxy
-            [whaleshell-runtime]=whaleshell/osg-runtime
-            [whaleshell-sdk]=whaleshell/osg-sdk
-            [whaleshell-gateway]=whaleshell/osg-gateway
+            [whaleshell-core]=whaleshell/whaleshell-core
+            [whaleshell-display]=whaleshell/whaleshell-display
+            [whaleshell-driver]=whaleshell/whaleshell-driver
+            [whaleshell-providers]=whaleshell/whaleshell-providers
+            [whaleshell-proxy]=whaleshell/whaleshell-proxy
+            [whaleshell-runtime]=whaleshell/whaleshell-runtime
+            [whaleshell-sdk]=whaleshell/whaleshell-sdk
+            [whaleshell-gateway]=whaleshell/whaleshell-gateway
             [slogx]=whaleshell/slogx
           )
           for local in \
