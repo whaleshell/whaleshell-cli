@@ -16,7 +16,7 @@ import (
 	"github.com/whaleshell/whaleshell-cli/internal/storage/gwconfig"
 	"github.com/whaleshell/whaleshell-core/defaults"
 	"github.com/whaleshell/whaleshell-runtime/refresh"
-	"github.com/whaleshell/whaleshell-sdk/gatewayclient"
+	"github.com/whaleshell/whaleshell-sdk/go/whaleshell"
 )
 
 // ProviderGet prints provider metadata (no secret values).
@@ -146,7 +146,7 @@ func (a *App) GatewayInfo() error {
 	if err != nil {
 		return err
 	}
-	info, err := gatewayclient.NewWithToken(u, a.gatewayTokenForURL(u)).Info(a.apiCtx())
+	info, err := whaleshell.NewWithToken(u, a.gatewayTokenForURL(u)).Info(a.apiCtx())
 	if err != nil {
 		return err
 	}
@@ -223,7 +223,7 @@ func (a *App) Whoami() error {
 		if strings.TrimSpace(g.Token) != "" {
 			snap.Auth = "token"
 		}
-		cli := gatewayclient.NewWithToken(g.URL, g.Token)
+		cli := whaleshell.NewWithToken(g.URL, g.Token)
 		ctx, cancel := a.withTimeout(TimeoutAPIShort)
 		defer cancel()
 		if who, err := cli.Whoami(ctx); err == nil {
@@ -651,7 +651,7 @@ func (a *App) ServiceExpose(sandbox, name, port string) error {
 				edgeURL = fmt.Sprintf("http://%s.openshell.localhost:%d/", name, gwPort)
 			}
 		}
-		rec := gatewayclient.ServiceRecord{
+		rec := whaleshell.ServiceRecord{
 			Name:        name,
 			Sandbox:     sandbox,
 			Port:        guestPort,

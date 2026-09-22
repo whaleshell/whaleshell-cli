@@ -14,7 +14,7 @@ import (
 	"github.com/whaleshell/whaleshell-core/env"
 	"github.com/whaleshell/whaleshell-core/policy"
 	"github.com/whaleshell/whaleshell-providers/provider"
-	"github.com/whaleshell/whaleshell-sdk/gatewayclient"
+	"github.com/whaleshell/whaleshell-sdk/go/whaleshell"
 	"gopkg.in/yaml.v3"
 )
 
@@ -161,7 +161,7 @@ func (a *App) ProviderCreate(args providerflags.CreateArgs) error {
 	if err != nil {
 		return err
 	}
-	rec := gatewayclient.ProviderRecord{
+	rec := whaleshell.ProviderRecord{
 		Name:                  args.Name,
 		Type:                  args.Profile,
 		EnvVars:               envVars,
@@ -199,7 +199,7 @@ func (a *App) ProviderUpdate(name string, fromExisting bool, credentials map[str
 	if err != nil {
 		return err
 	}
-	var rec gatewayclient.ProviderRecord
+	var rec whaleshell.ProviderRecord
 	found := false
 	for _, p := range list {
 		if p.Name == name {
@@ -284,7 +284,7 @@ func (a *App) prepareProviders(base policy.Document, basePath string, names []st
 func (a *App) resolveProviderForCreate(name, gwURL string) (provider.Profile, []string, string, error) {
 	// Prefer existing gateway instance with this name (OpenShell: --provider <instance>).
 	if gwURL != "" {
-		c := gatewayclient.New(gwURL)
+		c := whaleshell.New(gwURL)
 		list, err := c.ListProviders(a.apiCtx())
 		if err != nil {
 			return provider.Profile{}, nil, "", fmt.Errorf("provider %q: gateway %s: %w (is whaleshell-gateway running?)", name, gwURL, err)
@@ -330,14 +330,14 @@ func (a *App) resolveProviderForCreate(name, gwURL string) (provider.Profile, []
 		}
 	}
 	if gwURL != "" {
-		c := gatewayclient.New(gwURL)
+		c := whaleshell.New(gwURL)
 		creds := map[string]string{}
 		for _, k := range keys {
 			if v, ok := os.LookupEnv(k); ok && strings.TrimSpace(v) != "" && !env.IsPlaceholder(v) {
 				creds[k] = v
 			}
 		}
-		if err := c.PutProvider(a.apiCtx(), gatewayclient.ProviderRecord{
+		if err := c.PutProvider(a.apiCtx(), whaleshell.ProviderRecord{
 			Name: name, Type: prof.ID, EnvVars: keys, Credentials: creds,
 		}); err != nil {
 			return provider.Profile{}, nil, "", fmt.Errorf("provider %q: register on gateway: %w", name, err)

@@ -4,8 +4,8 @@ package app
 import (
 	"context"
 
-	"github.com/whaleshell/whaleshell-cli/app/cli"
-	"github.com/whaleshell/whaleshell-cli/config"
+	"github.com/whaleshell/whaleshell-cli/internal/app/cli"
+	"github.com/whaleshell/whaleshell-cli/internal/config"
 	"github.com/whaleshell/whaleshell-cli/internal/logger"
 )
 

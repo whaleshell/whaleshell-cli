@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/whaleshell/whaleshell-cli/internal/osargs"
-	"github.com/whaleshell/whaleshell-sdk/gatewayclient"
+	"github.com/whaleshell/whaleshell-sdk/go/whaleshell"
 )
 
 // InferenceRouteGet prints the gateway inference route.
@@ -38,7 +38,7 @@ func (a *App) InferenceRouteSet(opt osargs.InferenceSet) error {
 	}
 	ctx, cancel := a.withTimeout(TimeoutAPILong)
 	defer cancel()
-	route := gatewayclient.InferenceRoute{
+	route := whaleshell.InferenceRoute{
 		Provider:   opt.Provider,
 		Model:      opt.Model,
 		TimeoutSec: opt.TimeoutSec,

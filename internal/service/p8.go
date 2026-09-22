@@ -18,9 +18,7 @@ import (
 	"github.com/whaleshell/whaleshell-cli/internal/storage/gwconfig"
 	"github.com/whaleshell/whaleshell-core/defaults"
 	"github.com/whaleshell/whaleshell-driver/driver"
-	"github.com/whaleshell/whaleshell-driver/mounts"
-	"github.com/whaleshell/whaleshell-driver/sidecar"
-	"github.com/whaleshell/whaleshell-sdk/gatewayclient"
+	"github.com/whaleshell/whaleshell-sdk/go/whaleshell"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -87,7 +85,7 @@ func (a *App) touchGateway(ctx context.Context, name, id, image, network, status
 	if u == "" {
 		return
 	}
-	_ = gatewayclient.New(u).UpsertSandbox(ctx, gatewayclient.Sandbox{
+	_ = whaleshell.New(u).UpsertSandbox(ctx, whaleshell.Sandbox{
 		Name: name, ID: id, Image: image, Network: network, Status: status, Labels: labels,
 	})
 }
@@ -104,7 +102,7 @@ func (a *App) Copy(src, dst string) error {
 	dName, dPath, dOK := splitSandboxPath(dst)
 	switch {
 	case !sOK && dOK:
-		if err := mounts.ValidateUploadDest(dPath); err != nil {
+		if err := driver.ValidateUploadDest(dPath); err != nil {
 			return fmt.Errorf("cp: %w", err)
 		}
 		info, err := a.Sandboxes.Driver.Inspect(ctx, dName)
@@ -282,7 +280,7 @@ func (a *App) StartRelayAgent(name, gatewayURL string) error {
 	if err != nil {
 		return err
 	}
-	bin, err := sidecar.EnsureLinuxAgent(ctx, mod)
+	bin, err := driver.EnsureLinuxAgent(ctx, mod)
 	if err != nil {
 		return err
 	}
@@ -316,11 +314,11 @@ func (a *App) RelayExec(name string, argv []string) error {
 	if u == "" {
 		return fmt.Errorf("relay exec: no current gateway")
 	}
-	c := gatewayclient.New(u)
+	c := whaleshell.New(u)
 	c.HTTP.Timeout = defaults.RelayClientTimeout
 	ctx, cancel := a.withTimeout(defaults.RelayClientTimeout)
 	defer cancel()
-	out, err := c.Exec(ctx, name, argv)
+	out, err := c.Exec(ctx, name, argv...)
 	if err != nil {
 		return err
 	}

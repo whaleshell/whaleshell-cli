@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/whaleshell/whaleshell-cli/internal/outfmt"
-	"github.com/whaleshell/whaleshell-sdk/gatewayclient"
+	"github.com/whaleshell/whaleshell-sdk/go/whaleshell"
 )
 
 // StatusSnapshot is structured status for -o json|yaml.
@@ -32,7 +32,7 @@ func (a *App) Status() error {
 	out.Gateway = u
 	ctx, cancel := a.withTimeout(TimeoutAPIShort)
 	defer cancel()
-	cli := gatewayclient.NewWithToken(u, a.gatewayTokenForURL(u))
+	cli := whaleshell.NewWithToken(u, a.gatewayTokenForURL(u))
 	if _, err := cli.Healthz(ctx); err == nil {
 		out.Status = "Connected"
 	}

@@ -10,14 +10,14 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/whaleshell/whaleshell-sdk/gatewayclient"
+	"github.com/whaleshell/whaleshell-sdk/go/whaleshell"
 )
 
 // RuleListFilter lists policy.local proposals (gateway) with local fallback.
 func (a *App) RuleListFilter(sandbox, status string) error {
 	if sandbox != "" {
 		if gw, err := a.currentGatewayURL(); err == nil && gw != "" {
-			c := gatewayclient.NewWithToken(gw, a.gatewayTokenForURL(gw))
+			c := whaleshell.NewWithToken(gw, a.gatewayTokenForURL(gw))
 			ctx, cancel := a.withTimeout(TimeoutAPI)
 			defer cancel()
 			list, err := c.ListProposals(ctx, sandbox, status)
@@ -29,10 +29,10 @@ func (a *App) RuleListFilter(sandbox, status string) error {
 			fmt.Fprintf(os.Stderr, "rule: gateway list: %v (falling back to local)\n", err)
 		}
 	} else if gw, err := a.currentGatewayURL(); err == nil && gw != "" {
-		c := gatewayclient.NewWithToken(gw, a.gatewayTokenForURL(gw))
+		c := whaleshell.NewWithToken(gw, a.gatewayTokenForURL(gw))
 		ctx, cancel := a.withTimeout(TimeoutAPI)
 		defer cancel()
-		var all []gatewayclient.Proposal
+		var all []whaleshell.Proposal
 		for _, sb := range a.ruleCandidateSandboxes(ctx, c) {
 			list, err := c.ListProposals(ctx, sb, status)
 			if err != nil {
@@ -104,7 +104,7 @@ func (a *App) ruleDecide(id string, approve bool, reason string) error {
 		}
 		return a.ruleSet(id, state, reason)
 	}
-	c := gatewayclient.NewWithToken(gw, a.gatewayTokenForURL(gw))
+	c := whaleshell.NewWithToken(gw, a.gatewayTokenForURL(gw))
 	ctx, cancel := a.withTimeout(TimeoutAPILong)
 	defer cancel()
 
@@ -156,7 +156,7 @@ func (a *App) ruleDecide(id string, approve bool, reason string) error {
 	return nil
 }
 
-func (a *App) ruleCandidateSandboxes(ctx context.Context, c *gatewayclient.Client) []string {
+func (a *App) ruleCandidateSandboxes(ctx context.Context, c *whaleshell.Client) []string {
 	var out []string
 	if list, err := c.ListSandboxes(ctx); err == nil {
 		for _, sb := range list {

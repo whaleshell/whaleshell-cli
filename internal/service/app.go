@@ -27,17 +27,12 @@ import (
 	"github.com/whaleshell/whaleshell-core/policy"
 	display "github.com/whaleshell/whaleshell-display"
 	"github.com/whaleshell/whaleshell-driver/driver"
-	dockerdriver "github.com/whaleshell/whaleshell-driver/driver/docker"
-	"github.com/whaleshell/whaleshell-driver/driver/kubernetes"
-	"github.com/whaleshell/whaleshell-driver/driver/podman"
-	"github.com/whaleshell/whaleshell-driver/driver/vm"
-	"github.com/whaleshell/whaleshell-driver/mounts"
-	"github.com/whaleshell/whaleshell-driver/sidecar"
+	_ "github.com/whaleshell/whaleshell-driver/driver/all"
 	"github.com/whaleshell/whaleshell-proxy/proxy"
 	"github.com/whaleshell/whaleshell-runtime/inference"
 	"github.com/whaleshell/whaleshell-runtime/sandbox"
 	"github.com/whaleshell/whaleshell-runtime/secrets"
-	"github.com/whaleshell/whaleshell-sdk/gatewayclient"
+	"github.com/whaleshell/whaleshell-sdk/go/whaleshell"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 )
@@ -46,8 +41,8 @@ import (
 type App struct {
 	Sandboxes  *sandbox.Manager
 	Display    display.Stack
-	Docker     *dockerdriver.Driver // Engine API client (Docker or Podman)
-	DriverName string               // "docker" | "podman" | "vm" | "kubernetes"
+	Docker     driver.Engine // Docker/Podman Engine API (nil for vm/k8s stubs)
+	DriverName string        // "docker" | "podman" | "vm" | "kubernetes"
 
 	// OpenShell global session (ApplyGlobal).
 	OutputFormat        string
@@ -63,29 +58,26 @@ type App struct {
 func New() *App {
 	a := &App{Display: display.None{}, DriverName: selectedDriver()}
 	switch a.DriverName {
-	case "vm":
-		a.Sandboxes = &sandbox.Manager{Driver: vm.New()}
-		return a
-	case "kubernetes":
-		a.Sandboxes = &sandbox.Manager{Driver: kubernetes.New()}
+	case "vm", "kubernetes":
+		d, err := driver.Open(a.DriverName)
+		if err != nil {
+			a.Sandboxes = &sandbox.Manager{}
+			return a
+		}
+		a.Sandboxes = &sandbox.Manager{Driver: d}
 		return a
 	}
-	var d *dockerdriver.Driver
-	var err error
-	switch a.DriverName {
-	case "podman":
-		d, err = podman.New()
-	default:
-		d, err = dockerdriver.New()
-		a.DriverName = "docker"
-	}
+	eng, err := driver.OpenEngine(a.DriverName)
 	if err != nil {
 		a.Sandboxes = &sandbox.Manager{}
 		return a
 	}
-	a.Docker = d
+	if a.DriverName != "podman" {
+		a.DriverName = "docker"
+	}
+	a.Docker = eng
 	a.Sandboxes = &sandbox.Manager{
-		Driver: d,
+		Driver: eng,
 		Proxy:  proxy.NewCONNECT(&engine.Allowlist{}),
 	}
 	return a
@@ -150,7 +142,7 @@ func (a *App) Health() error {
 	defer probeCancel()
 	probe := a.probeLandlock(probeCtx)
 	fmt.Printf("  landlock:         %s\n", probe)
-	fmt.Printf("  seccomp:          %s\n", dockerdriver.SeccompNote())
+	fmt.Printf("  seccomp:          %s\n", driver.SeccompNote())
 	for _, img := range []string{defaults.ImageLocal, defaults.ImageCursor} {
 		ok := a.Docker.ImagePresent(ctx, img)
 		state := "missing (task runtime:image:cli / task docker:agent:cursor)"
@@ -162,7 +154,7 @@ func (a *App) Health() error {
 	if u, err := a.currentGatewayURL(); err == nil && u != "" {
 		gctx, gcancel := a.withTimeout(TimeoutAPIShort)
 		defer gcancel()
-		cli := gatewayclient.New(u)
+		cli := whaleshell.New(u)
 		if _, err := cli.Healthz(gctx); err != nil {
 			fmt.Printf("  gateway:          unreachable (%s)\n", u)
 		} else {
@@ -204,7 +196,7 @@ func (a *App) Doctor() error {
 	}
 	ctx, cancel := a.withTimeout(TimeoutAPIShort)
 	defer cancel()
-	cli := gatewayclient.New(u)
+	cli := whaleshell.New(u)
 	info, err := cli.Info(ctx)
 	if err != nil {
 		return fmt.Errorf("doctor: gateway info: %w", err)
@@ -306,7 +298,7 @@ func (a *App) PolicyGlobalGet() error {
 	if err != nil {
 		return err
 	}
-	b, err := gatewayclient.NewWithToken(u, a.gatewayTokenForURL(u)).GetGlobalPolicy(a.apiCtx())
+	b, err := whaleshell.NewWithToken(u, a.gatewayTokenForURL(u)).GetGlobalPolicy(a.apiCtx())
 	if err != nil {
 		return err
 	}
@@ -334,7 +326,7 @@ func (a *App) PolicyGlobalSet(path string) error {
 	if err := doc.Validate(); err != nil {
 		return err
 	}
-	if err := gatewayclient.NewWithToken(u, a.gatewayTokenForURL(u)).PutGlobalPolicy(a.apiCtx(), b); err != nil {
+	if err := whaleshell.NewWithToken(u, a.gatewayTokenForURL(u)).PutGlobalPolicy(a.apiCtx(), b); err != nil {
 		return err
 	}
 	fmt.Printf("policy global set: ok url=%s bytes=%d\n", u, len(b))
@@ -347,7 +339,7 @@ func (a *App) PolicyGlobalClear() error {
 	if err != nil {
 		return err
 	}
-	if err := gatewayclient.NewWithToken(u, a.gatewayTokenForURL(u)).PutGlobalPolicy(a.apiCtx(), nil); err != nil {
+	if err := whaleshell.NewWithToken(u, a.gatewayTokenForURL(u)).PutGlobalPolicy(a.apiCtx(), nil); err != nil {
 		return err
 	}
 	fmt.Println("policy delete --global: ok")
@@ -383,7 +375,7 @@ func (a *App) PolicySet(sandboxName, path string, wait bool) error {
 	var appliedBytes []byte
 
 	if gw, err := a.currentGatewayURL(); err == nil && gw != "" {
-		c := gatewayclient.NewWithToken(gw, a.gatewayTokenForURL(gw))
+		c := whaleshell.NewWithToken(gw, a.gatewayTokenForURL(gw))
 		ctx, cancel := a.withTimeout(TimeoutAPILong)
 		defer cancel()
 		if _, err := c.Healthz(ctx); err == nil {
@@ -629,7 +621,7 @@ func (a *App) mergeGatewayGlobal(doc policy.Document) (policy.Document, error) {
 	if err != nil || u == "" {
 		return doc, nil
 	}
-	b, err := gatewayclient.NewWithToken(u, a.gatewayTokenForURL(u)).GetGlobalPolicy(a.apiCtx())
+	b, err := whaleshell.NewWithToken(u, a.gatewayTokenForURL(u)).GetGlobalPolicy(a.apiCtx())
 	if err != nil || len(bytesTrim(b)) == 0 {
 		return doc, nil
 	}
@@ -842,7 +834,7 @@ func (a *App) SandboxCreate(opt SandboxCreateOpts) error {
 		DriverConfigJSON: opt.DriverConfigJSON,
 	}
 	if opt.Memory != "" {
-		if mem, err := dockerdriver.ParseMemoryBytes(opt.Memory); err != nil {
+		if mem, err := driver.ParseMemoryBytes(opt.Memory); err != nil {
 			return fmt.Errorf("sandbox create --memory: %w", err)
 		} else {
 			spec.MemoryBytes = mem
@@ -857,7 +849,7 @@ func (a *App) SandboxCreate(opt SandboxCreateOpts) error {
 		spec.Env = append(spec.Env, k+"="+v)
 	}
 	if !opt.NoHostInternal {
-		spec.ExtraHosts = dockerdriver.HostGatewayExtraHosts()
+		spec.ExtraHosts = driver.HostGatewayExtraHosts()
 	}
 	spec.GatewayURL = gwURL
 	displayURL := ""
@@ -896,7 +888,7 @@ func (a *App) SandboxCreate(opt SandboxCreateOpts) error {
 		if err != nil {
 			return err
 		}
-		sshBin, err := sidecar.EnsureLinuxSSHD(ctx, mod)
+		sshBin, err := driver.EnsureLinuxSSHD(ctx, mod)
 		if err != nil {
 			return err
 		}
@@ -921,12 +913,12 @@ func (a *App) SandboxCreate(opt SandboxCreateOpts) error {
 	}
 	log = log.With(slog.String("sandbox_id", shortID(string(h.ID))), slog.String("image", h.Image))
 	if gwURL != "" {
-		cli := gatewayclient.New(gwURL)
+		cli := whaleshell.New(gwURL)
 		baseYAML := ""
 		if b, err := os.ReadFile(basePath); err == nil {
 			baseYAML = string(b)
 		}
-		_ = cli.UpsertSandbox(ctx, gatewayclient.Sandbox{
+		_ = cli.UpsertSandbox(ctx, whaleshell.Sandbox{
 			Name:              h.Name,
 			ID:                string(h.ID),
 			Image:             h.Image,
@@ -986,7 +978,7 @@ func (a *App) SandboxCreate(opt SandboxCreateOpts) error {
 	}
 	if opt.Upload != "" {
 		dest := "/workspace/" + filepath.Base(opt.Upload)
-		if err := mounts.ValidateUploadDest(dest); err != nil {
+		if err := driver.ValidateUploadDest(dest); err != nil {
 			return fmt.Errorf("sandbox create --upload: %w", err)
 		}
 		if err := a.Copy(opt.Upload, h.Name+":"+dest); err != nil {
@@ -1098,7 +1090,7 @@ func (a *App) SandboxRemove(nameOrID string) error {
 	}
 	if cfg, _, err := gwconfig.Load(); err == nil {
 		if u := gwconfig.CurrentURL(cfg); u != "" {
-			_ = gatewayclient.New(u).DeleteSandbox(ctx, name)
+			_ = whaleshell.New(u).DeleteSandbox(ctx, name)
 		}
 	}
 	log.Info("sandbox removed", slog.String("name", name))
@@ -1166,7 +1158,7 @@ func (a *App) LogsToOpts(ctx context.Context, opt LogsOpts, w io.Writer) error {
 	}
 	// Prefer gateway SSE when available.
 	if gw, err := a.currentGatewayURL(); err == nil && gw != "" {
-		c := gatewayclient.NewWithToken(gw, a.gatewayTokenForURL(gw))
+		c := whaleshell.NewWithToken(gw, a.gatewayTokenForURL(gw))
 		if _, err := c.Healthz(ctx); err == nil {
 			if opt.Follow {
 				return c.FollowLogs(ctx, names, opt.All, opt.Since, opt.Source, opt.Level, w)
@@ -1327,7 +1319,7 @@ func (a *App) GatewayStatus() error {
 	if u := gwconfig.CurrentURL(cfg); u != "" {
 		ctx, cancel := a.withTimeout(TimeoutAPIShort)
 		defer cancel()
-		info, err := gatewayclient.New(u).Healthz(ctx)
+		info, err := whaleshell.New(u).Healthz(ctx)
 		if err != nil {
 			fmt.Printf("healthz: unreachable (%v)\n", err)
 			return nil
@@ -1349,7 +1341,7 @@ func (a *App) GatewayListRemote() error {
 	}
 	ctx, cancel := a.withTimeout(TimeoutAPI)
 	defer cancel()
-	list, err := gatewayclient.New(u).ListSandboxes(ctx)
+	list, err := whaleshell.New(u).ListSandboxes(ctx)
 	if err != nil {
 		return err
 	}
@@ -1388,7 +1380,7 @@ func (a *App) Exec(opt ExecOpts) error {
 	// works without recreating the container (Docker Config.Env is immutable).
 	guestEnv := a.credentialPlaceholdersForSandbox(opt.Name)
 	// git ignores SSL_CERT_FILE; older sandboxes lack GIT_SSL_CAINFO at create-time.
-	guestEnv = mergeEnvEntries(guestEnv, sidecar.CABundleEnv(defaults.GuestCAFile))
+	guestEnv = mergeEnvEntries(guestEnv, driver.CABundleEnv(defaults.GuestCAFile))
 	guestEnv = mergeEnvEntries(guestEnv, opt.Env)
 	tty := opt.TTY
 	// Interactive: honor Ctrl+C via command context; no artificial wall clock.
@@ -1427,10 +1419,10 @@ func (a *App) emitProc(sandbox, activity, details string, exitCode int) {
 	if activity == "EXIT" {
 		text = fmt.Sprintf("%s OCSF PROC:EXIT [INFO] ALLOWED %s [exit:%d]", ts.Format(time.RFC3339Nano), details, exitCode)
 	}
-	c := gatewayclient.NewWithToken(gw, a.gatewayTokenForURL(gw))
+	c := whaleshell.NewWithToken(gw, a.gatewayTokenForURL(gw))
 	ctx, cancel := a.withTimeout(TimeoutEmit)
 	defer cancel()
-	_ = c.PostLogs(ctx, sandbox, []gatewayclient.LogLine{{
+	_ = c.PostLogs(ctx, sandbox, []whaleshell.LogLine{{
 		TS: ts, Source: "proc", Level: "INFO", Text: text,
 	}})
 }
@@ -1482,7 +1474,7 @@ func (a *App) Run(opt RunOpts) error {
 			PolicyPath:    policyPath,
 			NoHarden:      opt.NoHarden,
 			PersistVolume: true,
-			ExtraHosts:    dockerdriver.HostGatewayExtraHosts(),
+			ExtraHosts:    driver.HostGatewayExtraHosts(),
 		}
 		if display.ParseMode(opt.Display) == display.ModeNoVNC ||
 			(doc.Display != nil && display.ParseMode(doc.Display.Mode) == display.ModeNoVNC) {
@@ -1605,7 +1597,7 @@ func (a *App) Proxy(opt ProxyOpts) error {
 	}
 	var pusher proxy.LogPusher
 	if gwURL != "" && sandbox != "" {
-		pusher = gatewayAuditPusher{c: gatewayclient.New(gwURL)}
+		pusher = gatewayAuditPusher{c: whaleshell.New(gwURL)}
 	}
 	audit := proxy.NewMultiAudit(os.Stderr, logDir, sandbox, pusher)
 	defer audit.Close()
@@ -1646,7 +1638,7 @@ func (a *App) Proxy(opt ProxyOpts) error {
 }
 
 func refreshProxySecrets(srv *proxy.Server, gwURL, sandbox string) error {
-	c := gatewayclient.New(gwURL)
+	c := whaleshell.New(gwURL)
 	ctx, cancel := context.WithTimeout(context.Background(), TimeoutAPIShort)
 	defer cancel()
 	m, err := c.ResolveSecrets(ctx, sandbox)
@@ -1686,18 +1678,18 @@ func GuestGatewayURL(gwURL string) string {
 	return u
 }
 
-// gatewayAuditPusher adapts gatewayclient to proxy.LogPusher.
+// gatewayAuditPusher adapts SDK client to proxy.LogPusher.
 type gatewayAuditPusher struct {
-	c *gatewayclient.Client
+	c *whaleshell.Client
 }
 
 func (g gatewayAuditPusher) PostLogs(ctx context.Context, sandbox string, lines []proxy.AuditLine) error {
 	if g.c == nil || len(lines) == 0 {
 		return nil
 	}
-	out := make([]gatewayclient.LogLine, len(lines))
+	out := make([]whaleshell.LogLine, len(lines))
 	for i, l := range lines {
-		out[i] = gatewayclient.LogLine{TS: l.TS, Source: l.Source, Level: l.Level, Text: l.Text}
+		out[i] = whaleshell.LogLine{TS: l.TS, Source: l.Source, Level: l.Level, Text: l.Text}
 	}
 	return g.c.PostLogs(ctx, sandbox, out)
 }
@@ -1845,7 +1837,7 @@ func proxyGatewayEnv(sandbox, gwURL string) []string {
 }
 
 func inferenceProxyEnv(gwURL string) []string {
-	c := gatewayclient.New(gwURL)
+	c := whaleshell.New(gwURL)
 	ctx, cancel := context.WithTimeout(context.Background(), TimeoutAPIShort)
 	defer cancel()
 	route, err := c.GetInference(ctx)
@@ -1869,7 +1861,7 @@ func inferenceProxyEnv(gwURL string) []string {
 	return out
 }
 
-func inferenceUpstreamForType(providerName string, c *gatewayclient.Client, ctx context.Context) string {
+func inferenceUpstreamForType(providerName string, c *whaleshell.Client, ctx context.Context) string {
 	rec, err := c.GetProvider(ctx, providerName)
 	if err != nil {
 		return ""
@@ -2005,7 +1997,7 @@ func ensureProxyBin(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return sidecar.EnsureLinuxCLI(ctx, mod)
+	return driver.EnsureLinuxCLI(ctx, mod)
 }
 
 func ensureInitBin(ctx context.Context) (string, error) {
@@ -2013,7 +2005,7 @@ func ensureInitBin(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return sidecar.EnsureLinuxInit(ctx, mod)
+	return driver.EnsureLinuxInit(ctx, mod)
 }
 
 func findModuleDir(modulePath string) (string, error) {

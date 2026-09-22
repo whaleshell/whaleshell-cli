@@ -12,7 +12,7 @@ import (
 
 	"github.com/whaleshell/slogx"
 	"github.com/whaleshell/whaleshell-core/defaults"
-	"github.com/whaleshell/whaleshell-sdk/gatewayclient"
+	"github.com/whaleshell/whaleshell-sdk/go/whaleshell"
 )
 
 const localGatewayName = "local"
@@ -28,7 +28,7 @@ func (a *App) GatewayEnsure() error {
 	if u, err := a.currentGatewayURL(); err == nil && u != "" {
 		ctx, cancel := a.withTimeout(TimeoutProbe)
 		defer cancel()
-		if _, err := gatewayclient.New(u).Healthz(ctx); err == nil {
+		if _, err := whaleshell.New(u).Healthz(ctx); err == nil {
 			log.Info("gateway already healthy", slog.String("url", u))
 			return nil
 		}
@@ -39,7 +39,7 @@ func (a *App) GatewayEnsure() error {
 		_ = a.GatewaySelect(localGatewayName)
 		ctx, cancel := a.withTimeout(TimeoutProbe)
 		defer cancel()
-		if _, err := gatewayclient.New(localGatewayURL).Healthz(ctx); err == nil {
+		if _, err := whaleshell.New(localGatewayURL).Healthz(ctx); err == nil {
 			log.Info("using existing local gateway", slog.String("url", localGatewayURL))
 			fmt.Printf("gateway ensure: using existing %s\n", localGatewayURL)
 			return nil
@@ -79,7 +79,7 @@ func (a *App) GatewayEnsure() error {
 	deadline := time.Now().Add(8 * time.Second)
 	for time.Now().Before(deadline) {
 		ctx, cancel := a.withTimeout(TimeoutProbeFast)
-		_, err := gatewayclient.New(localGatewayURL).Healthz(ctx)
+		_, err := whaleshell.New(localGatewayURL).Healthz(ctx)
 		cancel()
 		if err == nil {
 			_ = a.GatewayAdd(localGatewayName, localGatewayURL)

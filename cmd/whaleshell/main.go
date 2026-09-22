@@ -8,7 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/whaleshell/whaleshell-cli/app"
+	"github.com/whaleshell/whaleshell-cli/internal/app"
 	"github.com/whaleshell/whaleshell-cli/internal/logger"
 	"github.com/whaleshell/whaleshell-cli/internal/service"
 )

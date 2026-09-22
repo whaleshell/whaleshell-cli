@@ -7,7 +7,7 @@ import (
 
 	"github.com/whaleshell/whaleshell-cli/internal/global"
 	"github.com/whaleshell/whaleshell-cli/internal/storage/gwconfig"
-	"github.com/whaleshell/whaleshell-sdk/gatewayclient"
+	"github.com/whaleshell/whaleshell-sdk/go/whaleshell"
 )
 
 // ApplyGlobal stores OpenShell-style global flags for this CLI session.
@@ -91,7 +91,7 @@ func firstNonEmptyEnv(keys ...string) string {
 	return ""
 }
 
-func (a *App) gatewayClient() (*gatewayclient.Client, error) {
+func (a *App) gatewayClient() (*whaleshell.Client, error) {
 	if err := a.GatewayEnsure(); err != nil {
 		return nil, err
 	}
@@ -103,5 +103,5 @@ func (a *App) gatewayClient() (*gatewayclient.Client, error) {
 		return nil, fmt.Errorf("no gateway selected (whaleshell gateway ensure|add|select)")
 	}
 	tok := a.gatewayTokenForURL(u)
-	return gatewayclient.NewWithToken(u, tok), nil
+	return whaleshell.NewWithToken(u, tok), nil
 }
