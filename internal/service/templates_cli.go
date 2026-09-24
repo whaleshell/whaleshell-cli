@@ -84,6 +84,9 @@ func mergeTemplateIntoCreate(opt *SandboxCreateOpts, tpl templates.Template) {
 	if tpl.Memory != "" && opt.Memory == "" {
 		opt.Memory = tpl.Memory
 	}
+	if tpl.PidsLimit != 0 && opt.PidsLimit == 0 {
+		opt.PidsLimit = tpl.PidsLimit
+	}
 	if len(tpl.Providers) > 0 && len(opt.Providers) == 0 {
 		opt.Providers = append([]string{}, tpl.Providers...)
 	}

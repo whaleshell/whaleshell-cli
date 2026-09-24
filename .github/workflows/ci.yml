@@ -16,6 +16,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write  # Codecov OIDC
 
 jobs:
   formatting:
@@ -458,8 +459,14 @@ jobs:
       - name: Vet
         if: matrix.os == 'ubuntu-latest'
         run: go vet ./...
+      - name: Test (race + coverage)
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        env:
+          CGO_ENABLED: "1"
+        run: go test -race -count=1 -coverprofile=coverage.txt -covermode=atomic ./...
       - name: Test (race)
-        if: matrix.os != 'windows-latest'
+        if: matrix.os == 'macos-latest'
         shell: bash
         env:
           CGO_ENABLED: "1"
@@ -468,3 +475,12 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: bash
         run: go test -count=1 ./...
+      - name: Upload coverage to Codecov
+        if: matrix.os == 'ubuntu-latest'
+        uses: codecov/codecov-action@v5
+        with:
+          use_oidc: true
+          files: ./whaleshell-cli/coverage.txt
+          flags: unittests
+          name: codecov-whaleshell-cli
+          fail_ci_if_error: false

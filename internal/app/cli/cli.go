@@ -1087,6 +1087,16 @@ func runSandbox(a *service.App, args []string) error {
 					return fmt.Errorf("--memory needs a size (512m, 4g, …)")
 				}
 				opt.Memory = rest[i]
+			case "--pids-limit":
+				i++
+				if i >= len(rest) {
+					return fmt.Errorf("--pids-limit needs an int (-1 unlimited, >0 limit)")
+				}
+				var n int64
+				if _, err := fmt.Sscanf(rest[i], "%d", &n); err != nil || n == 0 {
+					return fmt.Errorf("invalid --pids-limit (use -1 for unlimited or positive int)")
+				}
+				opt.PidsLimit = n
 			case "--template":
 				i++
 				if i >= len(rest) {
@@ -1276,6 +1286,14 @@ func runSandboxTemplate(a *service.App, args []string) error {
 					return fmt.Errorf("--memory needs value")
 				}
 				t.Memory = args[i]
+			case "--pids-limit":
+				i++
+				if i >= len(args) {
+					return fmt.Errorf("--pids-limit needs value")
+				}
+				if _, err := fmt.Sscanf(args[i], "%d", &t.PidsLimit); err != nil || t.PidsLimit == 0 {
+					return fmt.Errorf("invalid --pids-limit")
+				}
 			case "--provider":
 				i++
 				if i >= len(args) {

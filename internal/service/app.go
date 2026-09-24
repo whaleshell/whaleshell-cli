@@ -700,6 +700,7 @@ type SandboxCreateOpts struct {
 	Upload   string
 	CPU      float64
 	Memory   string
+	PidsLimit int64 // 0 unset (driver default); -1 unlimited; >0 explicit
 	Template string
 
 	DriverConfigJSON string // --driver-config-json
@@ -736,6 +737,7 @@ func (a *App) SandboxCreate(opt SandboxCreateOpts) error {
 		}
 		mergeTemplateIntoCreate(&opt, tpl)
 	}
+	applyCreateDefaults(&opt)
 	ws := opt.Workspace
 	if ws == "" && a.GlobalWorkspace != "" && a.GlobalWorkspace != "default" {
 		ws = a.GlobalWorkspace
@@ -831,6 +833,7 @@ func (a *App) SandboxCreate(opt SandboxCreateOpts) error {
 		GPU:              opt.GPU || envTruthy("WHALESHELL_GPU"),
 		CDIDevices:       append([]string{}, opt.CDIDevices...),
 		CPU:              opt.CPU,
+		PidsLimit:        opt.PidsLimit,
 		DriverConfigJSON: opt.DriverConfigJSON,
 	}
 	if opt.Memory != "" {

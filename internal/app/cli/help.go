@@ -111,7 +111,8 @@ Flags (OpenShell-aligned):
   --from base|ollama|cursor|claude|…
   --image IMAGE
   --policy PATH
-  --cpu N --memory SIZE
+  --cpu N --memory SIZE   (or set defaults.memory in config / WHALESHELL_DEFAULT_MEMORY)
+  --pids-limit N          (-1 unlimited; default 2048 via driver)
   --provider NAME (repeatable)
   --forward PORT (repeatable)
   --workspace PATH

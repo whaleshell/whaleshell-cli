@@ -16,6 +16,15 @@ type File struct {
 	Gateways map[string]Gateway `yaml:"gateways,omitempty"`
 	// Images maps BYOC / community short names to container images (--from).
 	Images map[string]string `yaml:"images,omitempty"`
+	// Defaults apply on sandbox create when flags/template omit the field (non-breaking).
+	Defaults CreateDefaults `yaml:"defaults,omitempty"`
+}
+
+// CreateDefaults are optional soft defaults for sandbox create (OpenShell template spirit).
+type CreateDefaults struct {
+	Memory    string  `yaml:"memory,omitempty"`     // e.g. 2g — only when --memory unset
+	CPU       float64 `yaml:"cpu,omitempty"`        // only when --cpu unset
+	PidsLimit int64   `yaml:"pids_limit,omitempty"` // only when --pids-limit unset; 0 skips
 }
 
 // Gateway is one named control-plane endpoint.

@@ -17,6 +17,7 @@ type Template struct {
 	Policy    string            `json:"policy,omitempty"`
 	CPU       float64           `json:"cpu,omitempty"`
 	Memory    string            `json:"memory,omitempty"` // e.g. 4Gi, 512m
+	PidsLimit int64             `json:"pids_limit,omitempty"`
 	Env       map[string]string `json:"env,omitempty"`
 	Providers []string          `json:"providers,omitempty"`
 	Forwards  []int             `json:"forwards,omitempty"`
