@@ -563,7 +563,7 @@ func runForward(a *service.App, args []string) error {
 			return err
 		}
 		if parsed.Name == "" {
-			return fmt.Errorf("usage: whaleshell forward start <port> <sandbox> [-d]")
+			return fmt.Errorf("usage: whaleshell forward start [bind:]port <sandbox> [-d]")
 		}
 		return a.ForwardStart(parsed.Name, parsed.Port, parsed.Port, parsed.Background)
 	case "stop":
@@ -1165,32 +1165,17 @@ func runSandbox(a *service.App, args []string) error {
 		}
 		return a.Copy(parsed.Name+":"+parsed.Path, dest)
 	case "ssh-config":
-		name := ""
-		if len(args) > 1 {
-			name = args[1]
+		parsed, err := osargs.ParseSandboxSSHConfig(args[1:])
+		if err != nil {
+			return err
 		}
-		if name == "" {
-			return fmt.Errorf("usage: whaleshell sandbox ssh-config <name>")
-		}
-		return a.SandboxSSHConfig(name)
+		return a.SandboxSSHConfig(parsed.Name, parsed.Install)
 	case "connect":
-		if len(args) < 2 {
-			return fmt.Errorf("usage: whaleshell sandbox connect <name> [--ssh]")
+		parsed, err := osargs.ParseSandboxConnect(args[1:])
+		if err != nil {
+			return err
 		}
-		sshMode := false
-		rest := args[2:]
-		for _, f := range rest {
-			if f == "--ssh" {
-				sshMode = true
-			}
-		}
-		if sshMode {
-			return a.ConnectSSH(args[1], true)
-		}
-		if len(rest) > 0 && rest[0] == "--" {
-			rest = rest[1:]
-		}
-		return a.SandboxConnect(args[1], rest)
+		return a.SandboxConnect(service.ConnectOpts{Name: parsed.Name, Editor: parsed.Editor, Argv: parsed.Argv})
 	case "template":
 		return runSandboxTemplate(a, args[1:])
 	case "provider":
@@ -1335,7 +1320,7 @@ func runTerm(a *service.App, _ []string) error {
 	}
 	switch act.Kind {
 	case "connect":
-		return a.SandboxConnect(act.Name, nil)
+		return a.SandboxConnect(service.ConnectOpts{Name: act.Name})
 	case "exec":
 		return a.Exec(service.ExecOpts{Name: act.Name, Argv: []string{"bash"}, TTY: true})
 	case "logs":
@@ -1383,16 +1368,19 @@ func parseProfileIO(args []string, fileMode bool) (pathOrID, outFmt string, err 
 	return pathOrID, outFmt, nil
 }
 
-// runSSHProxy is the OpenShell ProxyCommand hook: whaleshell ssh-proxy <sandbox>.
+// runSSHProxy is the OpenShell ProxyCommand hook (token / name / legacy modes).
 func runSSHProxy(a *service.App, args []string) error {
-	name := ""
-	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
-		name = args[0]
+	parsed, err := osargs.ParseSSHProxy(args)
+	if err != nil {
+		return err
 	}
-	if name == "" {
-		return fmt.Errorf("usage: whaleshell ssh-proxy <sandbox>  (use as ProxyCommand in ~/.ssh/config)")
-	}
-	return a.SandboxSSHProxy(name)
+	return a.SSHProxy(service.SSHProxyOpts{
+		GatewayURL:  parsed.GatewayURL,
+		GatewayName: parsed.GatewayName,
+		SandboxID:   parsed.SandboxID,
+		Token:       parsed.Token,
+		Name:        parsed.Name,
+	})
 }
 
 // runProxy is the sidecar / host CONNECT proxy entrypoint.

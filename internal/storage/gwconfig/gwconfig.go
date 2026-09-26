@@ -81,24 +81,38 @@ func Load() (File, string, error) {
 	return f, p, nil
 }
 
-// Save writes config atomically.
+// Save writes config atomically, owner-only: it holds gateway bearer and
+// refresh tokens.
 func Save(f File) error {
 	p, err := Path()
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+	dir := filepath.Dir(p)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 	b, err := yaml.Marshal(f)
 	if err != nil {
 		return err
 	}
-	tmp := p + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+	tmp, err := os.CreateTemp(dir, ".config-*.yaml")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, p)
+	defer os.Remove(tmp.Name())
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(b); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), p)
 }
 
 // CurrentURL returns the selected gateway URL if any.

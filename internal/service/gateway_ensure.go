@@ -12,7 +12,6 @@ import (
 
 	"github.com/whaleshell/slogx"
 	"github.com/whaleshell/whaleshell-core/defaults"
-	"github.com/whaleshell/whaleshell-sdk/go/whaleshell"
 )
 
 const localGatewayName = "local"
@@ -28,7 +27,7 @@ func (a *App) GatewayEnsure() error {
 	if u, err := a.currentGatewayURL(); err == nil && u != "" {
 		ctx, cancel := a.withTimeout(TimeoutProbe)
 		defer cancel()
-		if _, err := whaleshell.New(u).Healthz(ctx); err == nil {
+		if _, err := a.clientFor(u).Healthz(ctx); err == nil {
 			log.Info("gateway already healthy", slog.String("url", u))
 			return nil
 		}
@@ -39,7 +38,7 @@ func (a *App) GatewayEnsure() error {
 		_ = a.GatewaySelect(localGatewayName)
 		ctx, cancel := a.withTimeout(TimeoutProbe)
 		defer cancel()
-		if _, err := whaleshell.New(localGatewayURL).Healthz(ctx); err == nil {
+		if _, err := a.clientFor(localGatewayURL).Healthz(ctx); err == nil {
 			log.Info("using existing local gateway", slog.String("url", localGatewayURL))
 			fmt.Printf("gateway ensure: using existing %s\n", localGatewayURL)
 			return nil
@@ -62,7 +61,7 @@ func (a *App) GatewayEnsure() error {
 		return fmt.Errorf("gateway ensure: log: %w", err)
 	}
 	log.Info("starting local gateway", slog.String("bin", bin), slog.String("listen", defaults.GatewayListen))
-	cmd := exec.Command(bin, "--listen", defaults.GatewayListen)
+	cmd := exec.Command(bin, "--listen", defaults.GatewayListen, "--data-dir", defaultGatewayDataDir())
 	cmd.Stdout = logF
 	cmd.Stderr = logF
 	cmd.SysProcAttr = gatewaySysProcAttr()
@@ -79,7 +78,7 @@ func (a *App) GatewayEnsure() error {
 	deadline := time.Now().Add(8 * time.Second)
 	for time.Now().Before(deadline) {
 		ctx, cancel := a.withTimeout(TimeoutProbeFast)
-		_, err := whaleshell.New(localGatewayURL).Healthz(ctx)
+		_, err := a.clientFor(localGatewayURL).Healthz(ctx)
 		cancel()
 		if err == nil {
 			_ = a.GatewayAdd(localGatewayName, localGatewayURL)

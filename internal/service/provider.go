@@ -284,7 +284,7 @@ func (a *App) prepareProviders(base policy.Document, basePath string, names []st
 func (a *App) resolveProviderForCreate(name, gwURL string) (provider.Profile, []string, string, error) {
 	// Prefer existing gateway instance with this name (OpenShell: --provider <instance>).
 	if gwURL != "" {
-		c := whaleshell.New(gwURL)
+		c := a.clientFor(gwURL)
 		list, err := c.ListProviders(a.apiCtx())
 		if err != nil {
 			return provider.Profile{}, nil, "", fmt.Errorf("provider %q: gateway %s: %w (is whaleshell-gateway running?)", name, gwURL, err)
@@ -330,7 +330,7 @@ func (a *App) resolveProviderForCreate(name, gwURL string) (provider.Profile, []
 		}
 	}
 	if gwURL != "" {
-		c := whaleshell.New(gwURL)
+		c := a.clientFor(gwURL)
 		creds := map[string]string{}
 		for _, k := range keys {
 			if v, ok := os.LookupEnv(k); ok && strings.TrimSpace(v) != "" && !env.IsPlaceholder(v) {

@@ -12,6 +12,15 @@
 #                           "nightly" for the moving nightly build)
 #   WHALESHELL_INSTALL_DIR  Install directory (default: ~/.local/bin)
 #   WHALESHELL_REPO         Override owner/name (default: whaleshell/whaleshell-cli)
+#   WHALESHELL_RELEASE_URL  Base URL holding <tag>/<archive> (mirror / air-gapped;
+#                           default: https://github.com/<repo>/releases/download)
+#
+# Layout (Homebrew-style prefix, derived from the install dir):
+#   <prefix>/bin/whaleshell
+#   <prefix>/bin/whaleshell-gateway            (linux / macOS; `whaleshell gateway ensure`)
+#   <prefix>/libexec/whaleshell/linux-<arch>/{whaleshell,whaleshell-init,whaleshell-sshd}
+# The linux helpers are mounted into sandboxes and proxy sidecars, so no Go
+# toolchain, source checkout, or local image build is needed.
 #
 set -eu
 
@@ -115,8 +124,9 @@ main() {
   if [ "$_target" = "Windows_x86_64" ] || [ "$_target" = "Windows_arm64" ]; then
     _archive="${APP_NAME}_${_target}.zip"
   fi
-  _url="${GITHUB_URL}/releases/download/${_version}/${_archive}"
-  _checksums_url="${GITHUB_URL}/releases/download/${_version}/checksums.txt"
+  _base="${WHALESHELL_RELEASE_URL:-${GITHUB_URL}/releases/download}"
+  _url="${_base}/${_version}/${_archive}"
+  _checksums_url="${_base}/${_version}/checksums.txt"
   _dir="$(install_dir)"
 
   info "installing ${_version} (${_target}) → ${_dir}"
@@ -131,10 +141,11 @@ main() {
     info "verifying checksum"
     (
       cd "$_tmpdir"
+      grep "[ *]${_archive}\$" checksums.txt > archive.sha256 || error "${_archive} missing from checksums.txt"
       if has_cmd sha256sum; then
-        grep " ${_archive}\$" checksums.txt | sha256sum -c -
+        sha256sum -c archive.sha256 >/dev/null || error "checksum mismatch for ${_archive}"
       elif has_cmd shasum; then
-        grep " ${_archive}\$" checksums.txt | shasum -a 256 -c -
+        shasum -a 256 -c archive.sha256 >/dev/null || error "checksum mismatch for ${_archive}"
       else
         info "sha256 tool missing; skipping checksum verify"
       fi
@@ -153,20 +164,37 @@ main() {
       ;;
   esac
 
-  _bin="${_tmpdir}/${APP_NAME}"
-  [ -f "$_bin" ] || _bin="$(find "$_tmpdir" -type f -name "$APP_NAME" -o -name "${APP_NAME}.exe" | head -1)"
-  [ -n "$_bin" ] && [ -f "$_bin" ] || error "binary not found in archive"
+  _exe="${APP_NAME}"
+  [ -f "${_tmpdir}/${APP_NAME}.exe" ] && _exe="${APP_NAME}.exe"
+  _bin="${_tmpdir}/${_exe}"
+  [ -f "$_bin" ] || error "binary not found in archive"
 
+  _sudo=""
   mkdir -p "$_dir" 2>/dev/null || true
-  if [ -w "$_dir" ] || mkdir -p "$_dir" 2>/dev/null; then
-    install -m 755 "$_bin" "${_dir}/${APP_NAME}"
-  else
+  if [ ! -w "$_dir" ]; then
     info "elevated permissions required for ${_dir}"
+    _sudo="sudo"
     sudo mkdir -p "$_dir"
-    sudo install -m 755 "$_bin" "${_dir}/${APP_NAME}"
+  fi
+  $_sudo install -m 755 "$_bin" "${_dir}/${_exe}"
+  if [ -f "${_tmpdir}/${APP_NAME}-gateway" ]; then
+    $_sudo install -m 755 "${_tmpdir}/${APP_NAME}-gateway" "${_dir}/${APP_NAME}-gateway"
+    info "gateway → ${_dir}/${APP_NAME}-gateway"
   fi
 
-  info "installed $("${_dir}/${APP_NAME}" version 2>/dev/null || echo "$_version") → ${_dir}/${APP_NAME}"
+  _helpers_src="${_tmpdir}/libexec/whaleshell"
+  _helpers_dst="$(dirname "$_dir")/libexec/whaleshell"
+  if [ -d "$_helpers_src" ]; then
+    $_sudo rm -rf "$_helpers_dst"
+    $_sudo mkdir -p "$_helpers_dst"
+    $_sudo cp -R "${_helpers_src}/." "${_helpers_dst}/"
+    $_sudo chmod -R a+rX,go-w "$_helpers_dst"
+    info "linux helpers → ${_helpers_dst}"
+  else
+    info "warning: ${_version} ships no linux helpers; sandbox create will need a source checkout + Go"
+  fi
+
+  info "installed $("${_dir}/${_exe}" version 2>/dev/null || echo "$_version") → ${_dir}/${_exe}"
 
   if ! is_on_path "$_dir"; then
     info "${_dir} is not on PATH; add it, e.g.:"

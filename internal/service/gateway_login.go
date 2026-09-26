@@ -16,7 +16,6 @@ import (
 	"github.com/whaleshell/whaleshell-cli/internal/storage/gwconfig"
 	display "github.com/whaleshell/whaleshell-display"
 	"github.com/whaleshell/whaleshell-runtime/idp"
-	"github.com/whaleshell/whaleshell-sdk/go/whaleshell"
 )
 
 // GatewayLoginInteractive stores a bearer token.
@@ -86,7 +85,7 @@ func (a *App) GatewayLoginInteractive(token string) error {
 		fmt.Fprintf(os.Stderr, "gateway login: browser flow failed (%v); trying direct local-dev auth\n", err)
 		ctx, cancel := a.withTimeout(TimeoutAPI)
 		defer cancel()
-		tok, err = whaleshell.New(u).AuthLogin(ctx)
+		tok, err = a.clientFor(u).AuthLogin(ctx)
 		if err != nil {
 			return fmt.Errorf("gateway login: %w", err)
 		}

@@ -120,19 +120,31 @@ jobs:
             esac
           }
 
+          helpers="${{ github.workspace }}/helpers"
+          bash scripts/build-linux-helpers.sh "$ver" "$helpers" amd64 arm64
+
+          # Same layout as GoReleaser: whaleshell + libexec/whaleshell/linux-<arch>/.
           build_cli() {
             local goos="$1" goarch="$2" ext="${3:-}"
             local name="whaleshell_$(archive_os "$goos")_$(archive_arch "$goarch")"
-            local bin="whaleshell${ext}"
+            local stage="${out}/stage-${name}"
             echo "→ ${name}"
+            mkdir -p "${stage}/libexec/whaleshell"
             GOOS="$goos" GOARCH="$goarch" go build -trimpath \
-              -ldflags="-s -w -X main.version=${ver}" \
-              -o "${out}/${bin}" ./cmd/whaleshell
-            if [[ "$goos" == "windows" ]]; then
-              (cd "$out" && zip -q "${name}.zip" "$bin" && rm -f "$bin")
-            else
-              (cd "$out" && tar -czf "${name}.tar.gz" "$bin" && rm -f "$bin")
+              -ldflags="-s -w -X github.com/whaleshell/whaleshell-cli/internal/service.BuildVersion=${ver}" \
+              -o "${stage}/whaleshell${ext}" ./cmd/whaleshell
+            cp -R "${helpers}/linux-${goarch}" "${stage}/libexec/whaleshell/"
+            if [[ "$goos" != "windows" && -d ../whaleshell-gateway ]]; then
+              GOOS="$goos" GOARCH="$goarch" go build -C ../whaleshell-gateway -trimpath -ldflags="-s -w" \
+                -o "${stage}/whaleshell-gateway" ./cmd/whaleshell-gateway
             fi
+            cp install.sh "${stage}/"
+            if [[ "$goos" == "windows" ]]; then
+              (cd "$stage" && zip -qr "${out}/${name}.zip" .)
+            else
+              tar -czf "${out}/${name}.tar.gz" -C "$stage" .
+            fi
+            rm -rf "$stage"
           }
 
           build_cli linux amd64
@@ -153,7 +165,7 @@ jobs:
             done
           fi
 
-          (cd "$out" && sha256sum ./*.tar.gz ./*.zip 2>/dev/null | tee checksums.txt)
+          (cd "$out" && sha256sum -- *.tar.gz *.zip | tee checksums.txt)
           cp install.sh "$out/"
           printf '%s\n' "$ver" > "$out/VERSION"
 

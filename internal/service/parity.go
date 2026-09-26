@@ -561,65 +561,6 @@ func (a *App) SettingsDelete(key string) error {
 	return writeJSONMap(path, m)
 }
 
-func (a *App) ForwardStart(sandbox, hostPort, guestPort string, background bool) error {
-	dir, err := localParityDir()
-	if err != nil {
-		return err
-	}
-	path := filepath.Join(dir, "forwards.json")
-	m, err := readJSONMap(path)
-	if err != nil {
-		return err
-	}
-	id := sandbox + ":" + hostPort
-	m[id] = map[string]any{
-		"sandbox": sandbox, "host_port": hostPort, "guest_port": guestPort,
-	}
-	if err := writeJSONMap(path, m); err != nil {
-		return err
-	}
-	if err := a.startForwardProxy(sandbox, hostPort, guestPort); err != nil {
-		fmt.Fprintf(os.Stderr, "forward: live proxy unavailable (%v); registry updated\n", err)
-		fmt.Printf("forward %s -> %s:%s recorded\n", hostPort, sandbox, guestPort)
-		return nil
-	}
-	if background {
-		fmt.Printf("forward: running in background (whaleshell forward stop %s)\n", id)
-	} else {
-		fmt.Printf("forward: proxy active (whaleshell forward stop %s)\n", id)
-	}
-	return nil
-}
-
-func (a *App) ForwardStop(id string) error {
-	a.stopForwardProxy(id)
-	dir, err := localParityDir()
-	if err != nil {
-		return err
-	}
-	path := filepath.Join(dir, "forwards.json")
-	m, err := readJSONMap(path)
-	if err != nil {
-		return err
-	}
-	delete(m, id)
-	return writeJSONMap(path, m)
-}
-
-func (a *App) ForwardList() error {
-	dir, err := localParityDir()
-	if err != nil {
-		return err
-	}
-	m, err := readJSONMap(filepath.Join(dir, "forwards.json"))
-	if err != nil {
-		return err
-	}
-	b, _ := json.MarshalIndent(m, "", "  ")
-	fmt.Println(string(b))
-	return nil
-}
-
 func (a *App) ServiceExpose(sandbox, name, port string) error {
 	guestPort, err := strconv.Atoi(strings.TrimSpace(port))
 	if err != nil || guestPort <= 0 {

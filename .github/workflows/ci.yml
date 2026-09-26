@@ -484,3 +484,80 @@ jobs:
           flags: unittests
           name: codecov-whaleshell-cli
           fail_ci_if_error: false
+
+  release-dry-run:
+    name: Release archives + install.sh
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout whaleshell-cli
+        uses: actions/checkout@v4
+        with:
+          path: whaleshell-cli
+          fetch-depth: 0
+
+      - name: Checkout sibling modules
+        run: |
+          set -euo pipefail
+          for m in whaleshell-core whaleshell-display whaleshell-driver whaleshell-providers \
+                   whaleshell-proxy whaleshell-runtime whaleshell-sdk whaleshell-gateway slogx; do
+            git clone --depth 1 "https://github.com/whaleshell/${m}.git" "${m}"
+          done
+
+      - name: Write go.work
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo 'go 1.27.0'
+            echo 'use ('
+            for d in whaleshell-* slogx; do echo "  ./$d"; done
+            echo ')'
+            echo 'replace ('
+            for d in whaleshell-*; do echo "  github.com/whaleshell/${d} v0.1.0-alpha.1 => ./$d"; done
+            echo '  github.com/whaleshell/slogx v0.1.0-alpha.1 => ./slogx'
+            echo ')'
+          } > go.work
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+          cache: true
+          cache-dependency-path: |
+            whaleshell-*/go.sum
+            slogx/go.sum
+
+      - name: GoReleaser snapshot
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          workdir: whaleshell-cli
+          args: release --snapshot --clean --skip=publish
+        env:
+          GOTOOLCHAIN: local
+
+      - name: Verify archive layout and install.sh
+        working-directory: whaleshell-cli
+        shell: bash
+        run: |
+          set -euo pipefail
+          for a in dist/whaleshell_Linux_x86_64.tar.gz dist/whaleshell_Darwin_arm64.tar.gz; do
+            arch=amd64; [[ "$a" == *arm64* ]] && arch=arm64
+            list="$(tar -tzf "$a")"
+            for f in whaleshell whaleshell-gateway \
+                     "libexec/whaleshell/linux-${arch}/whaleshell" \
+                     "libexec/whaleshell/linux-${arch}/whaleshell-init" \
+                     "libexec/whaleshell/linux-${arch}/whaleshell-sshd"; do
+              grep -qx "\(\./\)\?${f}" <<<"$list" || { echo "missing ${f} in ${a}"; echo "$list"; exit 1; }
+            done
+          done
+          unzip -l dist/whaleshell_Windows_x86_64.zip | grep -q "libexec/whaleshell/linux-amd64/whaleshell-sshd"
+
+          mkdir -p /tmp/rel && ln -s "$PWD/dist" /tmp/rel/snapshot
+          WHALESHELL_RELEASE_URL=file:///tmp/rel WHALESHELL_VERSION=snapshot \
+            WHALESHELL_INSTALL_DIR=/tmp/prefix/bin sh ./install.sh
+          test -x /tmp/prefix/bin/whaleshell
+          test -x /tmp/prefix/bin/whaleshell-gateway
+          test -x /tmp/prefix/libexec/whaleshell/linux-amd64/whaleshell-sshd
+          /tmp/prefix/bin/whaleshell version

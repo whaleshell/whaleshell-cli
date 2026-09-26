@@ -3,10 +3,13 @@ package service
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/whaleshell/whaleshell-cli/internal/global"
 	"github.com/whaleshell/whaleshell-cli/internal/storage/gwconfig"
+	"github.com/whaleshell/whaleshell-core/defaults"
 	"github.com/whaleshell/whaleshell-sdk/go/whaleshell"
 )
 
@@ -68,18 +71,64 @@ func (a *App) currentGatewayURL() (string, error) {
 	return strings.TrimRight(u, "/"), nil
 }
 
+// gatewayTokenForURL resolves the bearer for a gateway URL:
+// $WHALESHELL_GATEWAY_TOKEN, then the config token, then the gateway's
+// owner-only <data_dir>/auth_token (local gateways started by this CLI).
 func (a *App) gatewayTokenForURL(url string) string {
-	cfg, _, err := gwconfig.Load()
+	if v := strings.TrimSpace(os.Getenv(whaleshell.EnvToken)); v != "" {
+		return v
+	}
+	url = strings.TrimRight(url, "/")
+	dataDir := ""
+	if cfg, _, err := gwconfig.Load(); err == nil {
+		for _, g := range cfg.Gateways {
+			if strings.TrimRight(g.URL, "/") != url {
+				continue
+			}
+			if tok := strings.TrimSpace(g.Token); tok != "" {
+				return tok
+			}
+			if g.DataDir != "" {
+				dataDir = g.DataDir
+			}
+		}
+	}
+	if dataDir == "" && isLocalGatewayURL(url) {
+		dataDir = defaultGatewayDataDir()
+	}
+	if dataDir == "" {
+		return ""
+	}
+	b, err := os.ReadFile(filepath.Join(dataDir, gatewayAuthTokenFile))
 	if err != nil {
 		return ""
 	}
-	url = strings.TrimRight(url, "/")
-	for _, g := range cfg.Gateways {
-		if strings.TrimRight(g.URL, "/") == url {
-			return strings.TrimSpace(g.Token)
-		}
+	return strings.TrimSpace(string(b))
+}
+
+// gatewayAuthTokenFile mirrors the gateway store.AuthTokenFile.
+const gatewayAuthTokenFile = "auth_token"
+
+func isLocalGatewayURL(u string) bool {
+	u = strings.TrimRight(u, "/")
+	return u == localGatewayURL || u == "http://localhost:"+strconv.Itoa(defaults.GatewayPort)
+}
+
+// defaultGatewayDataDir mirrors whaleshell-gateway's default --data-dir.
+func defaultGatewayDataDir() string {
+	if xdg := os.Getenv("XDG_STATE_HOME"); xdg != "" {
+		return filepath.Join(xdg, "whaleshell", "gateway")
 	}
-	return ""
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(os.TempDir(), "whaleshell-gateway")
+	}
+	return filepath.Join(home, ".local", "state", "whaleshell", "gateway")
+}
+
+// clientFor returns an authenticated client for a gateway URL.
+func (a *App) clientFor(u string) *whaleshell.Client {
+	return whaleshell.NewWithToken(u, a.gatewayTokenForURL(u))
 }
 
 func firstNonEmptyEnv(keys ...string) string {
@@ -102,6 +151,5 @@ func (a *App) gatewayClient() (*whaleshell.Client, error) {
 	if u == "" {
 		return nil, fmt.Errorf("no gateway selected (whaleshell gateway ensure|add|select)")
 	}
-	tok := a.gatewayTokenForURL(u)
-	return whaleshell.NewWithToken(u, tok), nil
+	return a.clientFor(u), nil
 }

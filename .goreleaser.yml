@@ -7,6 +7,11 @@ version: 2
 
 project_name: whaleshell
 
+before:
+  hooks:
+    # linux helpers bundled in every CLI archive (libexec/whaleshell/linux-<arch>/)
+    - bash scripts/build-linux-helpers.sh {{ .Version }} build/helpers amd64 arm64
+
 builds:
   - id: whaleshell
     main: ./cmd/whaleshell
@@ -20,7 +25,7 @@ builds:
         goarch: arm64
     ldflags:
       - -s -w
-      - -X main.version={{.Version}}
+      - -X github.com/whaleshell/whaleshell-cli/internal/service.BuildVersion={{.Version}}
 
   - id: whaleshell-gateway
     dir: ../whaleshell-gateway
@@ -35,7 +40,9 @@ builds:
 
 archives:
   - id: cli
-    builds: [whaleshell]
+    # whaleshell-gateway rides along (linux/darwin) so `gateway ensure` works
+    # from a plain install.sh setup.
+    builds: [whaleshell, whaleshell-gateway]
     name_template: >-
       {{ .ProjectName }}_
       {{- title .Os }}_
@@ -50,6 +57,13 @@ archives:
       - LICENSE*
       - README*
       - install.sh
+      # Docker Desktop VMs match the host arch, so each archive carries the
+      # linux helpers for its own arch (windows/amd64 → linux-amd64).
+      - src: "build/helpers/linux-{{ .Arch }}/*"
+        dst: "libexec/whaleshell/linux-{{ .Arch }}"
+        strip_parent: true
+        info:
+          mode: 0755
 
   - id: gateway
     builds: [whaleshell-gateway]

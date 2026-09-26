@@ -30,6 +30,7 @@ import (
 	_ "github.com/whaleshell/whaleshell-driver/driver/all"
 	"github.com/whaleshell/whaleshell-proxy/proxy"
 	"github.com/whaleshell/whaleshell-runtime/inference"
+	"github.com/whaleshell/whaleshell-runtime/relayclient"
 	"github.com/whaleshell/whaleshell-runtime/sandbox"
 	"github.com/whaleshell/whaleshell-runtime/secrets"
 	"github.com/whaleshell/whaleshell-sdk/go/whaleshell"
@@ -107,7 +108,11 @@ func (a *App) Banner() string {
 }
 
 // Version reports the CLI stub version.
-func (a *App) Version() string { return "whaleshell 0.1.0-alpha.1" }
+// BuildVersion is set at release time:
+// -ldflags "-X github.com/whaleshell/whaleshell-cli/internal/service.BuildVersion=…".
+var BuildVersion = "0.1.0-alpha.1"
+
+func (a *App) Version() string { return "whaleshell " + BuildVersion }
 
 // Health probes Docker Engine / Podman API.
 func (a *App) Health() error {
@@ -145,16 +150,20 @@ func (a *App) Health() error {
 	fmt.Printf("  seccomp:          %s\n", driver.SeccompNote())
 	for _, img := range []string{defaults.ImageLocal, defaults.ImageCursor} {
 		ok := a.Docker.ImagePresent(ctx, img)
-		state := "missing (task runtime:image:cli / task docker:agent:cursor)"
+		state := "missing (pulled from GHCR on first use)"
+		if strings.EqualFold(os.Getenv(defaults.EnvImagePull), "never") {
+			state = "missing (task runtime:image:cli / task docker:agent:cursor)"
+		}
 		if ok {
 			state = "present"
 		}
 		fmt.Printf("  image %-18s %s\n", img+":", state)
 	}
+	fmt.Printf("  linux helpers:    %s\n", helperStatus())
 	if u, err := a.currentGatewayURL(); err == nil && u != "" {
 		gctx, gcancel := a.withTimeout(TimeoutAPIShort)
 		defer gcancel()
-		cli := whaleshell.New(u)
+		cli := a.clientFor(u)
 		if _, err := cli.Healthz(gctx); err != nil {
 			fmt.Printf("  gateway:          unreachable (%s)\n", u)
 		} else {
@@ -196,7 +205,7 @@ func (a *App) Doctor() error {
 	}
 	ctx, cancel := a.withTimeout(TimeoutAPIShort)
 	defer cancel()
-	cli := whaleshell.New(u)
+	cli := a.clientFor(u)
 	info, err := cli.Info(ctx)
 	if err != nil {
 		return fmt.Errorf("doctor: gateway info: %w", err)
@@ -677,8 +686,8 @@ type SandboxCreateOpts struct {
 	NoHostInternal bool // skip host.whaleshell.internal ExtraHosts
 	GatewayURL     string
 	From           string // BYOC / community image alias
-	SSH            bool
-	NoVolume       bool // skip persist GuestData volume (default: persist)
+	SSH            bool   // deprecated no-op: SSH relay is always on with the proxy sidecar
+	NoVolume       bool   // skip persist GuestData volume (default: persist)
 	GPU            bool
 	CDIDevices     []string
 	Argv           []string // after `--`: create then exec (OpenShell-like)
@@ -694,14 +703,14 @@ type SandboxCreateOpts struct {
 	// NoCredentialWarnings suppresses --env credential-looking key warnings.
 	NoCredentialWarnings bool
 
-	Detach   bool
-	Editor   string // vscode | cursor
-	Forwards []int
-	Upload   string
-	CPU      float64
-	Memory   string
+	Detach    bool
+	Editor    string // vscode | cursor
+	Forwards  []int
+	Upload    string
+	CPU       float64
+	Memory    string
 	PidsLimit int64 // 0 unset (driver default); -1 unlimited; >0 explicit
-	Template string
+	Template  string
 
 	DriverConfigJSON string // --driver-config-json
 	ApprovalMode     string // manual|auto
@@ -829,7 +838,6 @@ func (a *App) SandboxCreate(opt SandboxCreateOpts) error {
 		NoHarden:         opt.NoHarden,
 		Labels:           opt.Labels,
 		PersistVolume:    !opt.NoVolume,
-		EnableSSH:        opt.SSH,
 		GPU:              opt.GPU || envTruthy("WHALESHELL_GPU"),
 		CDIDevices:       append([]string{}, opt.CDIDevices...),
 		CPU:              opt.CPU,
@@ -886,25 +894,15 @@ func (a *App) SandboxCreate(opt SandboxCreateOpts) error {
 		}
 		spec.InitBin = initBin
 	}
-	if opt.SSH {
-		mod, err := findModuleDir("github.com/whaleshell/whaleshell-runtime")
-		if err != nil {
-			return err
-		}
-		sshBin, err := driver.EnsureLinuxSSHD(ctx, mod)
-		if err != nil {
-			return err
-		}
-		spec.SSHBin = sshBin
-		spec.EnableSSH = true
-	}
 	if !opt.NoProxy {
 		bin, err := ensureProxyBin(ctx)
 		if err != nil {
 			return err
 		}
 		spec.ProxyBin = bin
-		spec.ProxyEnv = append(proxySecretsForPolicy(doc), proxyGatewayEnv(opt.Name, gwURL)...)
+		if err := a.attachSupervisor(ctx, &spec, doc, name, gwURL); err != nil {
+			return err
+		}
 	}
 	h, err := a.Sandboxes.Create(ctx, sandbox.CreateOptions{
 		Spec:   spec,
@@ -916,7 +914,7 @@ func (a *App) SandboxCreate(opt SandboxCreateOpts) error {
 	}
 	log = log.With(slog.String("sandbox_id", shortID(string(h.ID))), slog.String("image", h.Image))
 	if gwURL != "" {
-		cli := whaleshell.New(gwURL)
+		cli := a.clientFor(gwURL)
 		baseYAML := ""
 		if b, err := os.ReadFile(basePath); err == nil {
 			baseYAML = string(b)
@@ -968,10 +966,8 @@ func (a *App) SandboxCreate(opt SandboxCreateOpts) error {
 			}
 		}
 	}
-	if opt.SSH {
-		if port, err := a.Sandboxes.Driver.SSHPort(ctx, h.ID); err == nil {
-			fmt.Printf("ssh: enabled on 127.0.0.1:%d (whaleshell connect --ssh %s)\n", port, h.Name)
-		}
+	if spec.EnableSSH {
+		fmt.Printf("ssh: via gateway relay (whaleshell sandbox connect %s | --editor cursor|vscode)\n", h.Name)
 	}
 	if spec.GPU {
 		fmt.Printf("gpu: CDI DeviceRequests enabled (see docs/exp/GPU.md)\n")
@@ -991,17 +987,9 @@ func (a *App) SandboxCreate(opt SandboxCreateOpts) error {
 	if err := a.installAgentConfig(h, opt); err != nil {
 		return fmt.Errorf("sandbox create agent-config: %w", err)
 	}
-	for _, p := range opt.Forwards {
-		if p > 0 {
-			_ = a.ForwardStart(h.Name, fmt.Sprintf("%d", p), fmt.Sprintf("%d", p), true)
-		}
-	}
-	switch strings.ToLower(strings.TrimSpace(opt.Editor)) {
-	case "vscode", "cursor":
-		if err := a.SandboxSSHConfig(h.Name); err != nil {
-			fmt.Fprintf(os.Stderr, "editor: ssh-config: %v\n", err)
-		} else {
-			fmt.Printf("editor: open %s via Remote-SSH (Host whaleshell-%s)\n", opt.Editor, h.Name)
+	if ed := strings.ToLower(strings.TrimSpace(opt.Editor)); ed != "" {
+		if err := a.SandboxConnect(ConnectOpts{Name: h.Name, Editor: ed}); err != nil {
+			fmt.Fprintf(os.Stderr, "editor: %v\n", err)
 		}
 	}
 	if len(opt.Argv) > 0 {
@@ -1093,24 +1081,12 @@ func (a *App) SandboxRemove(nameOrID string) error {
 	}
 	if cfg, _, err := gwconfig.Load(); err == nil {
 		if u := gwconfig.CurrentURL(cfg); u != "" {
-			_ = whaleshell.New(u).DeleteSandbox(ctx, name)
+			_ = a.clientFor(u).DeleteSandbox(ctx, name)
 		}
 	}
 	log.Info("sandbox removed", slog.String("name", name))
 	fmt.Printf("sandbox rm: ok %s\n", nameOrID)
 	return nil
-}
-
-// SandboxConnect opens an interactive shell (TTY) in the sandbox.
-func (a *App) SandboxConnect(name string, argv []string) error {
-	if len(argv) == 0 {
-		argv = ui.DefaultShellArgv()
-	}
-	return a.Exec(ExecOpts{
-		Name: name,
-		Argv: argv,
-		TTY:  term.IsTerminal(int(os.Stdin.Fd())),
-	})
 }
 
 // LogsOpts configures observation log streaming.
@@ -1322,7 +1298,7 @@ func (a *App) GatewayStatus() error {
 	if u := gwconfig.CurrentURL(cfg); u != "" {
 		ctx, cancel := a.withTimeout(TimeoutAPIShort)
 		defer cancel()
-		info, err := whaleshell.New(u).Healthz(ctx)
+		info, err := a.clientFor(u).Healthz(ctx)
 		if err != nil {
 			fmt.Printf("healthz: unreachable (%v)\n", err)
 			return nil
@@ -1344,7 +1320,7 @@ func (a *App) GatewayListRemote() error {
 	}
 	ctx, cancel := a.withTimeout(TimeoutAPI)
 	defer cancel()
-	list, err := whaleshell.New(u).ListSandboxes(ctx)
+	list, err := a.clientFor(u).ListSandboxes(ctx)
 	if err != nil {
 		return err
 	}
@@ -1518,7 +1494,9 @@ func (a *App) Run(opt RunOpts) error {
 				return err
 			}
 			spec.ProxyBin = bin
-			spec.ProxyEnv = append(proxySecretsForPolicy(doc), proxyGatewayEnv(name, "")...)
+			if err := a.attachSupervisor(ctx, &spec, doc, name, ""); err != nil {
+				return err
+			}
 		}
 		h, err := a.Sandboxes.Create(ctx, sandbox.CreateOptions{
 			Spec:   spec,
@@ -1571,6 +1549,11 @@ func (a *App) Proxy(opt ProxyOpts) error {
 	ctx = logger.ToContext(ctx, log)
 	log = log.With("op", op)
 
+	// Read the supervisor token once and drop it from the environment before
+	// the proxy snapshots os.Environ() into its placeholder secret store.
+	sandboxToken := strings.TrimSpace(os.Getenv(EnvSandboxToken))
+	_ = os.Unsetenv(EnvSandboxToken)
+
 	listen := opt.Listen
 	if listen == "" {
 		listen = defaults.ProxyListenLocal()
@@ -1598,20 +1581,26 @@ func (a *App) Proxy(opt ProxyOpts) error {
 	if sandbox == "" {
 		sandbox = os.Getenv("WHALESHELL_SANDBOX")
 	}
+	// OpenShell-style: WHALESHELL_GATEWAY_URL must resolve via ExtraHosts
+	// (host.whaleshell.internal → host-gateway). No hostname guessing.
+	var gw *whaleshell.Client
 	var pusher proxy.LogPusher
 	if gwURL != "" && sandbox != "" {
-		pusher = gatewayAuditPusher{c: whaleshell.New(gwURL)}
+		gwURL = GuestGatewayURL(gwURL)
+		gw = whaleshell.NewWithToken(gwURL, sandboxToken)
+		pusher = gatewayAuditPusher{c: gw}
+		if sandboxToken == "" {
+			log.Warn("no sandbox supervisor token; gateway calls will be rejected", "env", EnvSandboxToken)
+		}
 	}
 	audit := proxy.NewMultiAudit(os.Stderr, logDir, sandbox, pusher)
 	defer audit.Close()
 	srv := proxy.NewServer(&eng, audit)
+	srv.GatewayToken = sandboxToken
 
 	// Prefer gateway-stored secrets; fall back to process env.
-	// OpenShell-style: WHALESHELL_GATEWAY_URL must resolve via ExtraHosts
-	// (host.whaleshell.internal → host-gateway). No hostname guessing.
-	if gwURL != "" && sandbox != "" {
-		gwURL = GuestGatewayURL(gwURL)
-		if err := refreshProxySecrets(srv, gwURL, sandbox); err != nil {
+	if gw != nil {
+		if err := refreshProxySecrets(srv, gw, sandbox); err != nil {
 			log.Warn("gateway secrets unavailable", "error", err)
 		} else {
 			log.Info("secrets loaded from gateway", "sandbox", sandbox)
@@ -1620,9 +1609,24 @@ func (a *App) Proxy(opt ProxyOpts) error {
 			t := time.NewTicker(30 * time.Second)
 			defer t.Stop()
 			for range t.C {
-				_ = refreshProxySecrets(srv, gwURL, sandbox)
+				_ = refreshProxySecrets(srv, gw, sandbox)
 			}
 		}()
+	}
+
+	// Supervisor relay (OpenShell ConnectSupervisor): outbound session to the
+	// gateway bridging SSH sessions to the sandbox sshd socket.
+	if sock := strings.TrimSpace(os.Getenv(EnvSSHSocket)); sock != "" && gw != nil && sandboxToken != "" {
+		go func() {
+			_ = relayclient.Run(ctx, relayclient.Config{
+				GatewayURL: gwURL,
+				Sandbox:    sandbox,
+				Token:      sandboxToken,
+				SSHSocket:  sock,
+				Log:        log.Logger,
+			})
+		}()
+		log.Info("supervisor relay enabled", "socket", sock)
 	}
 
 	if ca := srv.CA(); ca != nil && opt.CAOut != "" {
@@ -1640,8 +1644,7 @@ func (a *App) Proxy(opt ProxyOpts) error {
 	return srv.ListenAndServe(ctx, listen)
 }
 
-func refreshProxySecrets(srv *proxy.Server, gwURL, sandbox string) error {
-	c := whaleshell.New(gwURL)
+func refreshProxySecrets(srv *proxy.Server, c *whaleshell.Client, sandbox string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), TimeoutAPIShort)
 	defer cancel()
 	m, err := c.ResolveSecrets(ctx, sandbox)
@@ -1816,10 +1819,18 @@ func proxySecretsForPolicy(doc policy.Document) []string {
 	return out
 }
 
-// proxyGatewayEnv adds WHALESHELL_GATEWAY_URL / WHALESHELL_SANDBOX so the sidecar can resolve
-// encrypted provider secrets and push OCSF logs (OpenShell-like).
+// EnvSandboxToken carries the sandbox-scoped supervisor token into the proxy
+// sidecar only (never the sandbox container).
+const EnvSandboxToken = "WHALESHELL_SANDBOX_TOKEN"
+
+// EnvSSHSocket is set by the driver when the sidecar shares the sshd socket.
+const EnvSSHSocket = "WHALESHELL_SSH_SOCKET"
+
+// proxyGatewayEnv adds WHALESHELL_GATEWAY_URL / WHALESHELL_SANDBOX /
+// WHALESHELL_SANDBOX_TOKEN so the sidecar can resolve encrypted provider
+// secrets, push OCSF logs and run the supervisor relay (OpenShell-like).
 // When an inference route is configured, also inject WHALESHELL_INFERENCE_* for inference.local.
-func proxyGatewayEnv(sandbox, gwURL string) []string {
+func (a *App) proxyGatewayEnv(sandbox, gwURL, sandboxToken string) []string {
 	var out []string
 	if gwURL == "" {
 		if cfg, _, err := gwconfig.Load(); err == nil {
@@ -1834,13 +1845,15 @@ func proxyGatewayEnv(sandbox, gwURL string) []string {
 	if sandbox != "" {
 		out = append(out, "WHALESHELL_SANDBOX="+sandbox)
 	}
+	if sandboxToken != "" {
+		out = append(out, EnvSandboxToken+"="+sandboxToken)
+	}
 	out = append(out, "WHALESHELL_LOG_DIR=/var/log")
-	out = append(out, inferenceProxyEnv(gwURL)...)
+	out = append(out, inferenceProxyEnv(a.clientFor(gwURL))...)
 	return out
 }
 
-func inferenceProxyEnv(gwURL string) []string {
-	c := whaleshell.New(gwURL)
+func inferenceProxyEnv(c *whaleshell.Client) []string {
 	ctx, cancel := context.WithTimeout(context.Background(), TimeoutAPIShort)
 	defer cancel()
 	route, err := c.GetInference(ctx)
@@ -1995,22 +2008,6 @@ func (a *App) AgentLogin(name string) error {
 	}
 }
 
-func ensureProxyBin(ctx context.Context) (string, error) {
-	mod, err := findModuleDir("github.com/whaleshell/whaleshell-cli")
-	if err != nil {
-		return "", err
-	}
-	return driver.EnsureLinuxCLI(ctx, mod)
-}
-
-func ensureInitBin(ctx context.Context) (string, error) {
-	mod, err := findModuleDir("github.com/whaleshell/whaleshell-runtime")
-	if err != nil {
-		return "", err
-	}
-	return driver.EnsureLinuxInit(ctx, mod)
-}
-
 func findModuleDir(modulePath string) (string, error) {
 	candidates := []string{}
 	if wd, err := os.Getwd(); err == nil {
@@ -2041,7 +2038,7 @@ func findModuleDir(modulePath string) (string, error) {
 			return try, nil
 		}
 	}
-	return "", fmt.Errorf("cannot find module %s (run from agent-blocker)", modulePath)
+	return "", fmt.Errorf("cannot find module %s source", modulePath)
 }
 
 func shortID(id string) string {
