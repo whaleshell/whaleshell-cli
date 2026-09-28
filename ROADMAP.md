@@ -1,6 +1,6 @@
 # Roadmap — whaleshell-cli
 
-Status: **v0.1.0-alpha.1** (alpha) · Depends on the full whaleshell module set `v0.1.0-alpha.1`
+Status: **v0.1.0-alpha.2** (alpha) · Depends on whaleshell-core / providers / SDK / gateway `v0.1.0-alpha.2` and the remaining module set `v0.1.0-alpha.1`
 
 ## This module
 
@@ -13,4 +13,4 @@ Status: **v0.1.0-alpha.1** (alpha) · Depends on the full whaleshell module set 
 
 ## Release
 
-**Last** in the Go cascade — requires all sibling modules at `v0.1.0-alpha.1`.
+**Last** in the Go cascade — requires all sibling modules at the versions recorded in `go.mod`.

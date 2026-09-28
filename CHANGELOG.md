@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [v0.1.0-alpha.2] - 2026-09-28
+
 ### Added
 
 - Import, validate, update, and resolve OpenShell-compatible provider profiles from local files or the gateway catalog.

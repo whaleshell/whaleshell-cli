@@ -5,13 +5,13 @@ go 1.27.0
 require (
 	github.com/charmbracelet/bubbletea v1.3.4
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/whaleshell/whaleshell-core v0.1.0-alpha.1
+	github.com/whaleshell/whaleshell-core v0.1.0-alpha.2
 	github.com/whaleshell/whaleshell-display v0.1.0-alpha.1
 	github.com/whaleshell/whaleshell-driver v0.1.0-alpha.1
-	github.com/whaleshell/whaleshell-providers v0.1.0-alpha.1
+	github.com/whaleshell/whaleshell-providers v0.1.0-alpha.2
 	github.com/whaleshell/whaleshell-proxy v0.1.0-alpha.1
 	github.com/whaleshell/whaleshell-runtime v0.1.0-alpha.1
-	github.com/whaleshell/whaleshell-sdk v0.1.0-alpha.1
+	github.com/whaleshell/whaleshell-sdk v0.1.0-alpha.2
 	github.com/whaleshell/slogx v0.1.0-alpha.1
 	golang.org/x/crypto v0.56.0
 	golang.org/x/term v0.46.0
